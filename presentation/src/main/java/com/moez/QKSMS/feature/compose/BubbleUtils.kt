@@ -40,7 +40,7 @@ object BubbleUtils {
             !canGroupWithPrevious && canGroupWithNext -> if (isMe) R.drawable.message_out_first else R.drawable.message_in_first
             canGroupWithPrevious && canGroupWithNext -> if (isMe) R.drawable.message_out_middle else R.drawable.message_in_middle
             canGroupWithPrevious && !canGroupWithNext -> if (isMe) R.drawable.message_out_last else R.drawable.message_in_last
-            else -> R.drawable.message_only
+            else -> if (isMe) R.drawable.message_out_only else R.drawable.message_in_only
         }
     }
 

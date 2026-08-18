@@ -50,11 +50,26 @@
         <attr name="textSize" />
     </declare-styleable>
 
+    <attr name="cardBackground" format="color|reference" />
+    <attr name="cardBorder" format="color|reference" />
+    <attr name="glassBackground" format="color|reference" />
+    <attr name="glassComposerBackground" format="color|reference" />
+    <attr name="pillSearchBackground" format="color|reference" />
+
+    <attr name="cardPosition" format="enum">
+        <enum name="none" value="0" />
+        <enum name="top" value="1" />
+        <enum name="middle" value="2" />
+        <enum name="bottom" value="3" />
+        <enum name="single" value="4" />
+    </attr>
+
     <declare-styleable name="PreferenceView">
         <attr name="title" />
         <attr name="summary" />
         <attr name="widget" />
         <attr name="icon" />
+        <attr name="cardPosition" />
     </declare-styleable>
 
     <declare-styleable name="RadioPreferenceView">

@@ -98,6 +98,16 @@ class PreferenceView @JvmOverloads constructor(
                 layout.icon.setImageResource(id)
             }
 
+            // Card position styling
+            val position = getInt(R.styleable.PreferenceView_cardPosition, 0)
+            when (position) {
+                1 -> setBackgroundResource(R.drawable.card_inset_top)
+                2 -> setBackgroundResource(R.drawable.card_inset_middle)
+                3 -> setBackgroundResource(R.drawable.card_inset_bottom)
+                4 -> setBackgroundResource(R.drawable.card_inset_single)
+                else -> setBackgroundResource(context.resolveThemeAttribute(R.attr.selectableItemBackground))
+            }
+
             recycle()
         }
     }
