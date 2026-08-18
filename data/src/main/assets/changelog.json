@@ -1,5 +1,19 @@
 [
   {
+    "versionCode": 2240,
+    "versionName": "4.3.8",
+    "fixed": [
+      "## What's Changed in v4.3.8",
+      "* Modern Material 3 Expressive & iOS Glassmorphic UI redesign",
+      "* Pill-shaped search bar and floating frosted-glass composer container",
+      "* Android 16 / iOS inset rounded grouped settings cards",
+      "* Dynamic asymmetric speech bubbles with tail corner geometry (18dp/4dp)",
+      "* Refined color token palettes for Light (Porcelain), Midnight Obsidian, and AMOLED Black",
+      "* Complete rule-based SMS/MMS Automations Engine with WorkManager delays and regex presets",
+      "* Full Android 16 (Baklava) compatibility with updated foreground service types and multi-scheme APK signing"
+    ]
+  },
+  {
     "versionCode": 2238,
     "versionName": "4.3.6",
     "fixed": [

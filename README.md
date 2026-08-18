@@ -10,7 +10,13 @@ QUIK is an open source replacement to the [stock messaging app](https://github.c
 
 ## Features
 
-- **Automations Engine (New)**: Fully configurable rule-based SMS/MMS automation pipeline
+- **Modern Material 3 Expressive & iOS Translucency Redesign (v4.3.8)**:
+  - **Pill Search Bar & Extended FAB**: Modern search bar with rounded pill geometry and elevated touch bounds.
+  - **Asymmetric Chat Speech Bubbles**: Google Messages / iOS style 18dp/4dp asymmetric speech bubble tails with message cluster grouping.
+  - **Floating Glass Composer**: Frosted glass floating composer pill with quick attachment and sending triggers.
+  - **Android 16 Inset Grouped Settings**: Settings and Automations organized into clean, rounded surface cards with subtle borders.
+  - **Porcelain & Midnight Obsidian Color Palettes**: Tailored high-contrast Light, Dark, and AMOLED black themes.
+- **Automations Engine**: Fully configurable rule-based SMS/MMS automation pipeline
   - **Triggers**: Match sender address or message body with exact text or regular expressions (Regex), case-sensitivity toggles, and regex presets (OTP, bank alerts, delivery tracking, spam, verification codes).
   - **Skip Contacts**: Automatically exclude trusted contacts from triggering automated actions.
   - **Actions**:
