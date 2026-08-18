@@ -45,9 +45,12 @@ class BluetoothMicManager(
 
     init {
         // register for bluetooth sco broadcast intents
-        context.registerReceiver(this, IntentFilter().apply {
-            addAction(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
-        })
+        androidx.core.content.ContextCompat.registerReceiver(
+            context,
+            this,
+            IntentFilter().apply { addAction(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) },
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+        )
     }
 
     var device: AudioDeviceInfo? = null

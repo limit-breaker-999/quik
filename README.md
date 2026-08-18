@@ -10,6 +10,21 @@ QUIK is an open source replacement to the [stock messaging app](https://github.c
 
 ## Features
 
+- **Automations Engine (New)**: Fully configurable rule-based SMS/MMS automation pipeline
+  - **Triggers**: Match sender address or message body with exact text or regular expressions (Regex), case-sensitivity toggles, and regex presets (OTP, bank alerts, delivery tracking, spam, verification codes).
+  - **Skip Contacts**: Automatically exclude trusted contacts from triggering automated actions.
+  - **Actions**:
+    - 🗑️ **Auto-Delete**: Drop or delete matching messages automatically.
+    - 📦 **Auto-Archive**: Move matching conversations straight to archive.
+    - 👁️ **Mark as Read**: Silence and auto-mark matching notifications as read.
+    - 📲 **Forward via SMS**: Forward incoming messages to another phone number.
+    - 🌐 **Forward via HTTP Webhook**: POST incoming message payloads (`{from, body, timestamp}`) to an external API or webhook endpoint.
+    - 💬 **Auto-Reply**: Send automated responses using customizable reply templates with `{sender}` placeholder support.
+  - **Configurable Action Delays**: Execute actions immediately or delay by 30s, 1m, 5m, or 1h using background `WorkManager` workers.
+  - **Hit Counter & Toggle**: Enable, disable, or monitor rule triggers at a glance.
+- **Android 14, 15 & 16 (Baklava) Ready**:
+  - Target SDK 34 with modern foreground service type declarations (`dataSync`, `specialUse`).
+  - Scoped storage alignment and multi-scheme APK signing (v1, v2, v3, v4).
 - Scheduled messages
 - Message backup
 - Speech-to-text and text-to-speech integrated within the app
@@ -23,6 +38,7 @@ QUIK is an open source replacement to the [stock messaging app](https://github.c
 - Swipe actions
 - Emoji reaction handling
 - and much, much more
+
 
 ## Download
 

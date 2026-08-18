@@ -37,7 +37,7 @@ class QkRealmMigration @Inject constructor(
 ) : RealmMigration {
 
     companion object {
-        const val SCHEMA_VERSION: Long = 15
+        const val SCHEMA_VERSION: Long = 16
     }
 
     @SuppressLint("ApplySharedPref")
@@ -298,6 +298,31 @@ class QkRealmMigration @Inject constructor(
             }
 
             version ++
+        }
+
+        if (version == 15L) {
+            realm.schema.create("AutomationRule")
+                .addField("id", Long::class.java, FieldAttribute.PRIMARY_KEY, FieldAttribute.REQUIRED)
+                .addField("name", String::class.java, FieldAttribute.REQUIRED)
+                .addField("enabled", Boolean::class.java, FieldAttribute.REQUIRED)
+                .addField("matchSender", String::class.java, FieldAttribute.REQUIRED)
+                .addField("matchSenderIsRegex", Boolean::class.java, FieldAttribute.REQUIRED)
+                .addField("matchSenderCaseSensitive", Boolean::class.java, FieldAttribute.REQUIRED)
+                .addField("matchBody", String::class.java, FieldAttribute.REQUIRED)
+                .addField("matchBodyIsRegex", Boolean::class.java, FieldAttribute.REQUIRED)
+                .addField("matchBodyCaseSensitive", Boolean::class.java, FieldAttribute.REQUIRED)
+                .addField("skipContacts", Boolean::class.java, FieldAttribute.REQUIRED)
+                .addField("action", String::class.java, FieldAttribute.REQUIRED)
+                .addField("forwardToPhone", String::class.java, FieldAttribute.REQUIRED)
+                .addField("forwardToUrl", String::class.java, FieldAttribute.REQUIRED)
+                .addField("appendSenderToForward", Boolean::class.java, FieldAttribute.REQUIRED)
+                .addField("replyTemplate", String::class.java, FieldAttribute.REQUIRED)
+                .addField("replyRateLimitMs", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("delayMs", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("createdAt", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("hitCount", Long::class.java, FieldAttribute.REQUIRED)
+
+            version++
         }
 
         check(version >= SCHEMA_VERSION) {

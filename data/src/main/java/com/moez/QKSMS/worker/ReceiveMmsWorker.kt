@@ -44,6 +44,7 @@ import com.klinker.android.send_message.MmsSentReceiver
 import com.klinker.android.send_message.SmsManagerFactory
 import com.klinker.android.send_message.Utils
 import dev.octoshrimpy.quik.blocking.BlockingClient
+import dev.octoshrimpy.quik.interactor.ExecuteAutomations
 import dev.octoshrimpy.quik.interactor.UpdateBadge
 import dev.octoshrimpy.quik.manager.ActiveConversationManager
 import dev.octoshrimpy.quik.manager.NotificationManager
@@ -88,6 +89,7 @@ class ReceiveMmsWorker(appContext: Context, workerParams: WorkerParameters)
     @Inject lateinit var shortcutManager: ShortcutManager
     @Inject lateinit var filterRepo: MessageContentFilterRepository
     @Inject lateinit var contactsRepo: ContactRepository
+    @Inject lateinit var executeAutomations: ExecuteAutomations
 
     override fun doWork(): Result {
         Timber.v("started")
@@ -192,6 +194,13 @@ class ReceiveMmsWorker(appContext: Context, workerParams: WorkerParameters)
                             Timber.v("message dropped based on content filters")
                             messageRepo.deleteMessages(listOf(message.id))
                             return Result.failure(inputData)
+                        }
+
+                        // Run automations
+                        val automationResult = executeAutomations.execute(message)
+                        if (automationResult is ExecuteAutomations.ExecutionResult.Dropped) {
+                            Timber.v("MMS dropped by automation rule")
+                            return Result.success()
                         }
 
                         // update the conversation
