@@ -4,17 +4,21 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:layout_marginStart="12dp"
+    android:layout_marginEnd="12dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginBottom="4dp"
     android:orientation="horizontal"
     android:padding="16dp"
     android:gravity="center_vertical"
-    android:background="?attr/selectableItemBackground">
+    android:background="@drawable/card_inset_single">
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:layout_marginEnd="8dp">
+        android:layout_marginEnd="12dp">
 
         <TextView
             android:id="@+id/automation_rule_name"
@@ -22,6 +26,7 @@
             android:layout_height="wrap_content"
             android:textAppearance="@style/TextAppearance.AppCompat.Subhead"
             android:textColor="?android:attr/textColorPrimary"
+            android:textStyle="bold"
             android:maxLines="1"
             android:ellipsize="end" />
 
@@ -29,7 +34,7 @@
             android:id="@+id/automation_rule_summary"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
+            android:layout_marginTop="4dp"
             android:textAppearance="@style/TextAppearance.AppCompat.Caption"
             android:textColor="?android:attr/textColorSecondary"
             android:maxLines="2"
@@ -54,4 +59,3 @@
         app:tint="?android:attr/textColorSecondary" />
 
 </LinearLayout>
-

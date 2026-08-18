@@ -47,6 +47,11 @@
         <item name="android:windowContentTransitions">true</item>
         <item name="actionBarPopupTheme">@style/PopupTheme</item>
         <item name="bubbleColor">@color/bubbleLight</item>
+        <item name="cardBackground">@color/surfaceLight</item>
+        <item name="cardBorder">@color/cardBorderLight</item>
+        <item name="glassBackground">@color/glassLight</item>
+        <item name="glassComposerBackground">@color/glassComposerLight</item>
+        <item name="pillSearchBackground">@color/surfaceLight</item>
         <item name="colorPrimary">@color/backgroundLight</item>
         <item name="colorPrimaryDark">@color/backgroundLight</item>
         <item name="selectableItemBackground">@drawable/ripple</item>
