@@ -73,6 +73,8 @@ import dev.octoshrimpy.quik.mapper.CursorToPartImpl
 import dev.octoshrimpy.quik.mapper.CursorToRecipient
 import dev.octoshrimpy.quik.mapper.CursorToRecipientImpl
 import dev.octoshrimpy.quik.mapper.RatingManagerImpl
+import dev.octoshrimpy.quik.repository.AutomationRuleRepository
+import dev.octoshrimpy.quik.repository.AutomationRuleRepositoryImpl
 import dev.octoshrimpy.quik.repository.BackupRepository
 import dev.octoshrimpy.quik.repository.BackupRepositoryImpl
 import dev.octoshrimpy.quik.repository.BlockingRepository
@@ -196,6 +198,9 @@ class AppModule(private var application: Application) {
     fun provideCursorToRecipient(mapper: CursorToRecipientImpl): CursorToRecipient = mapper
 
     // Repository
+
+    @Provides
+    fun provideAutomationRuleRepository(repository: AutomationRuleRepositoryImpl): AutomationRuleRepository = repository
 
     @Provides
     fun provideBackupRepository(repository: BackupRepositoryImpl): BackupRepository = repository

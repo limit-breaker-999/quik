@@ -47,6 +47,7 @@ import dev.octoshrimpy.quik.common.widget.PreferenceView
 import dev.octoshrimpy.quik.common.widget.TextInputDialog
 import dev.octoshrimpy.quik.databinding.SettingsControllerBinding
 import dev.octoshrimpy.quik.feature.settings.about.AboutController
+import dev.octoshrimpy.quik.feature.settings.automations.AutomationsController
 import dev.octoshrimpy.quik.feature.settings.swipe.SwipeActionsController
 import dev.octoshrimpy.quik.feature.themepicker.ThemePickerController
 import dev.octoshrimpy.quik.injection.appComponent
@@ -250,6 +251,12 @@ class SettingsController : QkController<SettingsControllerBinding, SettingsView,
 
     override fun showThemePicker() {
         router.pushController(RouterTransaction.with(ThemePickerController())
+                .pushChangeHandler(QkChangeHandler())
+                .popChangeHandler(QkChangeHandler()))
+    }
+
+    override fun showAutomations() {
+        router.pushController(RouterTransaction.with(AutomationsController())
                 .pushChangeHandler(QkChangeHandler())
                 .popChangeHandler(QkChangeHandler()))
     }

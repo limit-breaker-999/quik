@@ -23,6 +23,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import dev.octoshrimpy.quik.blocking.BlockingClient
+import dev.octoshrimpy.quik.interactor.ExecuteAutomations
 import dev.octoshrimpy.quik.interactor.UpdateBadge
 import dev.octoshrimpy.quik.manager.NotificationManager
 import dev.octoshrimpy.quik.manager.ShortcutManager
@@ -49,6 +50,7 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
     @Inject lateinit var shortcutManager: ShortcutManager
     @Inject lateinit var filterRepo: MessageContentFilterRepository
     @Inject lateinit var contactsRepo: ContactRepository
+    @Inject lateinit var executeAutomations: ExecuteAutomations
 
     override fun doWork(): Result {
         Timber.v("started")
@@ -94,6 +96,13 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
             Timber.v("message dropped based on content filters")
             messageRepo.deleteMessages(listOf(message.id))
             return Result.failure(inputData)
+        }
+
+        // Run automations (may delete/forward/archive/reply based on user-configured rules)
+        val automationResult = executeAutomations.execute(message)
+        if (automationResult is ExecuteAutomations.ExecutionResult.Dropped) {
+            Timber.v("message dropped by automation rule")
+            return Result.success()
         }
 
         // update and fetch conversation

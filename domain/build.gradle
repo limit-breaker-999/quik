@@ -31,7 +31,7 @@ android {
 
     defaultConfig {
         minSdk 23
-        targetSdkVersion 33
+        targetSdkVersion 34
     }
     namespace 'dev.octoshrimpy.quik.domain'
 }
@@ -39,6 +39,7 @@ android {
 dependencies {
     // androidx
     implementation "androidx.documentfile:documentfile:$androidx_documentfile_version"
+    implementation "androidx.work:work-runtime-ktx:$androidx_work_version"
 
     // dagger
     implementation "com.google.dagger:dagger:$dagger_version"
