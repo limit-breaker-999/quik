@@ -241,11 +241,8 @@ class MainActivity : QkThemedActivity(), MainView {
             else -> 0
         }
 
-        binding.toolbarSearch.setVisible(state.page is Inbox &&
-                state.page.selected == 0 ||
-                state.page is Searching
-        )
-        binding.toolbarTitle.setVisible(binding.toolbarSearch.visibility != View.VISIBLE)
+        binding.toolbarSearch.setVisible((state.page is Inbox && state.page.selected == 0) || state.page is Searching)
+        binding.toolbarTitle.setVisible(true)
 
         binding.toolbar.menu.apply {
             findItem(R.id.select_all)?.isVisible =
@@ -282,7 +279,11 @@ class MainActivity : QkThemedActivity(), MainView {
         when (state.page) {
             is Inbox -> {
                 showBackButton(state.page.selected > 0)
-                title = getString(R.string.main_title_selected, state.page.selected)
+                title = if (state.page.selected > 0) {
+                    getString(R.string.main_title_selected, state.page.selected)
+                } else {
+                    getString(R.string.app_title_messages)
+                }
                 if (binding.recyclerView.adapter !== conversationsAdapter)
                     binding.recyclerView.adapter = conversationsAdapter
                 conversationsAdapter.updateData(state.page.data)

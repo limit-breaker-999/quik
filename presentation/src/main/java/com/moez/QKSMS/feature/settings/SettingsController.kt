@@ -117,9 +117,16 @@ class SettingsController : QkController<SettingsControllerBinding, SettingsView,
         showBackButton(true)
     }
 
-    override fun preferenceClicks(): Observable<PreferenceView> = (0 until binding.preferences.childCount)
-            .map { index -> binding.preferences.getChildAt(index) }
-            .mapNotNull { view -> view as? PreferenceView }
+    private fun findPreferences(view: View): List<PreferenceView> {
+        return when (view) {
+            is PreferenceView -> listOf(view)
+            is ViewGroup -> (0 until view.childCount).flatMap { findPreferences(view.getChildAt(it)) }
+            else -> emptyList()
+        }
+    }
+
+    override fun preferenceClicks(): Observable<PreferenceView> =
+        findPreferences(binding.preferences)
             .map { preference -> preference.clicks().map { preference } }
             .let { preferences -> Observable.merge(preferences) }
 

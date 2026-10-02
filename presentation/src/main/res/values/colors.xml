@@ -25,27 +25,51 @@
     <color name="rippleDark">#33ffffff</color>
 
     <color name="toolbarLight">#FFFFFF</color>
-    <color name="toolbarDark">#1d262b</color>
+    <color name="toolbarDark">#1E293B</color>
     <color name="toolbarTranslucent">#88000000</color>
 
-    <color name="backgroundLight">#FFFFFF</color>
-    <color name="backgroundDark">#192025</color>
+    <!-- Modern Base Backgrounds -->
+    <color name="backgroundLight">#F8FAFC</color>
+    <color name="backgroundDark">#0B0F19</color>
 
-    <color name="textPrimary">#49555F</color>
-    <color name="textPrimaryDisabled">#4C49555F</color>
-    <color name="textSecondary">#70808D</color>
-    <color name="textSecondaryDisabled">#4C70808D</color>
-    <color name="textTertiary">#B7B9C0</color>
+    <!-- Modern Surface & Card Tokens -->
+    <color name="surfaceLight">#FFFFFF</color>
+    <color name="surfaceDark">#1E293B</color>
+    <color name="surfaceBlack">#121214</color>
+    <color name="cardBorderLight">#E2E8F0</color>
+    <color name="cardBorderDark">#334155</color>
+    <color name="cardBorderBlack">#27272A</color>
+
+    <!-- Translucent Glass Overlays -->
+    <color name="glassLight">#E6F8FAFC</color>
+    <color name="glassDark">#E60B0F19</color>
+    <color name="glassBlack">#E6000000</color>
+    <color name="glassComposerLight">#F2FFFFFF</color>
+    <color name="glassComposerDark">#F21E293B</color>
+    <color name="glassComposerBlack">#F2121214</color>
+
+    <!-- Pill Search Bar -->
+    <color name="pillSearchLight">#F1F5F9</color>
+    <color name="pillSearchDark">#1E293B</color>
+    <color name="pillSearchBlack">#18181B</color>
+
+    <!-- Modern Typography Colors (WCAG AAA/AA) -->
+    <color name="textPrimary">#0F172A</color>
+    <color name="textPrimaryDisabled">#4C0F172A</color>
+    <color name="textSecondary">#475569</color>
+    <color name="textSecondaryDisabled">#4C475569</color>
+    <color name="textTertiary">#94A3B8</color>
 
     <color name="textPrimaryDark">#FFFFFFFF</color>
     <color name="textPrimaryDisabledDark">#7FFFFFFF</color>
-    <color name="textSecondaryDark">#ccffffff</color>
-    <color name="textSecondaryDisabledDark">#67ffffff</color>
-    <color name="textTertiaryDark">#80ffffff</color>
+    <color name="textSecondaryDark">#CBD5E1</color>
+    <color name="textSecondaryDisabledDark">#67CBD5E1</color>
+    <color name="textTertiaryDark">#94A3B8</color>
 
-    <color name="bubbleLight">#ECEFF1</color>
-    <color name="bubbleDark">#11171B</color>
-    <color name="bubbleBlack">#0F1113</color>
+    <!-- Modern Bubbles -->
+    <color name="bubbleLight">#F1F5F9</color>
+    <color name="bubbleDark">#1E293B</color>
+    <color name="bubbleBlack">#16161A</color>
 
     <color name="separatorLight">#0C000000</color>
     <color name="separatorDark">#1AFFFFFF</color>

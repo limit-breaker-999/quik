@@ -64,7 +64,7 @@ class AvatarView @JvmOverloads constructor(
      */
     fun setRecipient(recipient: Recipient?) {
         lookupKey = recipient?.contact?.lookupKey
-        fullName = recipient?.contact?.name
+        fullName = recipient?.contact?.name?.takeIf { it.isNotBlank() } ?: recipient?.getDisplayName() ?: recipient?.address
         photoUri = recipient?.contact?.photoUri
         lastUpdated = recipient?.contact?.lastUpdate
         theme = colors.theme(recipient)
@@ -95,6 +95,7 @@ class AvatarView @JvmOverloads constructor(
 
         if (initials.isNotEmpty()) {
             layout.initial.text = if (initials.size > 1) initials.first() + initials.last() else initials.first()
+            layout.initial.visibility = VISIBLE
             layout.icon.visibility = GONE
         } else {
             layout.initial.text = null
@@ -102,10 +103,14 @@ class AvatarView @JvmOverloads constructor(
         }
 
         layout.photo.setImageDrawable(null)
-        photoUri?.let { photoUri ->
+        if (!photoUri.isNullOrEmpty()) {
+            layout.photo.visibility = VISIBLE
             GlideApp.with(layout.photo)
                     .load(photoUri)
+                    .circleCrop()
                     .into(layout.photo)
+        } else {
+            layout.photo.visibility = GONE
         }
     }
 }

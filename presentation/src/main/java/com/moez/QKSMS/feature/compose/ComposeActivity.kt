@@ -204,6 +204,8 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             theme
                 .doOnNext {
                     binding.loading.setTint(it.theme)
+                    binding.send.setTint(it.theme)
+                    binding.scheduledSend.setTint(it.theme)
 
                     // entire attach menu
                     binding.attach.setBackgroundTint(it.theme); binding.attach.setTint(it.textPrimary)
