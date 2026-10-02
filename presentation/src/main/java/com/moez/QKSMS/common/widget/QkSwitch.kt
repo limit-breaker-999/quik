@@ -21,16 +21,19 @@ package dev.octoshrimpy.quik.common.widget
 import android.content.Context
 import android.content.res.ColorStateList
 import android.util.AttributeSet
-import androidx.appcompat.widget.SwitchCompat
+import com.google.android.material.materialswitch.MaterialSwitch
 import dev.octoshrimpy.quik.R
 import dev.octoshrimpy.quik.common.util.Colors
 import dev.octoshrimpy.quik.common.util.extensions.resolveThemeColor
-import dev.octoshrimpy.quik.common.util.extensions.withAlpha
 import dev.octoshrimpy.quik.injection.appComponent
 import dev.octoshrimpy.quik.util.Preferences
 import javax.inject.Inject
 
-class QkSwitch @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : SwitchCompat(context, attrs) {
+class QkSwitch @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = com.google.android.material.R.attr.materialSwitchStyle
+) : MaterialSwitch(context, attrs, defStyleAttr) {
 
     @Inject lateinit var colors: Colors
     @Inject lateinit var prefs: Preferences
@@ -45,20 +48,30 @@ class QkSwitch @JvmOverloads constructor(context: Context, attrs: AttributeSet? 
         super.onAttachedToWindow()
 
         if (!isInEditMode) {
-            val states = arrayOf(
-                    intArrayOf(-android.R.attr.state_enabled),
-                    intArrayOf(android.R.attr.state_checked),
-                    intArrayOf())
+            val themeColor = colors.theme().theme
+            val onThemeColor = colors.theme().textPrimary
 
-            thumbTintList = ColorStateList(states, intArrayOf(
-                    context.resolveThemeColor(R.attr.switchThumbDisabled),
-                    colors.theme().theme,
-                    context.resolveThemeColor(R.attr.switchThumbEnabled)))
+            val thumbStates = arrayOf(
+                intArrayOf(-android.R.attr.state_enabled),
+                intArrayOf(android.R.attr.state_checked),
+                intArrayOf()
+            )
+            thumbTintList = ColorStateList(thumbStates, intArrayOf(
+                context.resolveThemeColor(R.attr.switchThumbDisabled),
+                onThemeColor,
+                context.resolveThemeColor(R.attr.switchThumbEnabled)
+            ))
 
-            trackTintList = ColorStateList(states, intArrayOf(
-                    context.resolveThemeColor(R.attr.switchTrackDisabled),
-                    colors.theme().theme.withAlpha(0x4D),
-                    context.resolveThemeColor(R.attr.switchTrackEnabled)))
+            val trackStates = arrayOf(
+                intArrayOf(-android.R.attr.state_enabled),
+                intArrayOf(android.R.attr.state_checked),
+                intArrayOf()
+            )
+            trackTintList = ColorStateList(trackStates, intArrayOf(
+                context.resolveThemeColor(R.attr.switchTrackDisabled),
+                themeColor,
+                context.resolveThemeColor(R.attr.switchTrackEnabled)
+            ))
         }
     }
 }

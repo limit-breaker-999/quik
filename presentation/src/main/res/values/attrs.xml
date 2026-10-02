@@ -24,6 +24,13 @@
     <attr name="widget" format="reference" />
     <attr name="icon" format="reference" />
 
+    <!-- Modern M3 / Translucency Theme Attributes -->
+    <attr name="cardBackground" format="color" />
+    <attr name="cardBorder" format="color" />
+    <attr name="glassBackground" format="color" />
+    <attr name="glassComposerBackground" format="color" />
+    <attr name="pillSearchBackground" format="color" />
+
     <attr name="textColor" format="enum">
         <enum name="theme" value="0" />
         <enum name="primaryOnTheme" value="1" />

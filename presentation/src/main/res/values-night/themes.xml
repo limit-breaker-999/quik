@@ -42,6 +42,11 @@
         <item name="switchThumbDisabled">@color/switchThumbDisabledDark</item>
         <item name="switchTrackEnabled">@color/switchTrackEnabledDark</item>
         <item name="switchTrackDisabled">@color/switchTrackDisabledDark</item>
+        <item name="cardBackground">@color/surfaceDark</item>
+        <item name="cardBorder">@color/cardBorderDark</item>
+        <item name="glassBackground">@color/glassDark</item>
+        <item name="glassComposerBackground">@color/glassComposerDark</item>
+        <item name="pillSearchBackground">@color/pillSearchDark</item>
         <item name="windowActionBar">false</item>
     </style>
 
@@ -55,6 +60,11 @@
         <item name="colorPrimary">@color/backgroundDark</item>
         <item name="colorPrimaryDark">@color/backgroundDark</item>
         <item name="selectableItemBackground">@drawable/ripple_dark</item>
+        <item name="cardBackground">@color/surfaceDark</item>
+        <item name="cardBorder">@color/cardBorderDark</item>
+        <item name="glassBackground">@color/glassDark</item>
+        <item name="glassComposerBackground">@color/glassComposerDark</item>
+        <item name="pillSearchBackground">@color/pillSearchDark</item>
         <item name="windowActionBar">false</item>
     </style>
 
@@ -71,6 +81,11 @@
         <item name="bubbleColor">@color/bubbleBlack</item>
         <item name="colorPrimary">@color/black</item>
         <item name="colorPrimaryDark">@color/black</item>
+        <item name="cardBackground">@color/surfaceBlack</item>
+        <item name="cardBorder">@color/cardBorderBlack</item>
+        <item name="glassBackground">@color/glassBlack</item>
+        <item name="glassComposerBackground">@color/glassComposerBlack</item>
+        <item name="pillSearchBackground">@color/pillSearchBlack</item>
     </style>
 
     <style name="AppThemeDialog.Black">
@@ -78,6 +93,11 @@
         <item name="actionBarPopupTheme">@style/PopupTheme.Black</item>
         <item name="colorPrimary">@color/black</item>
         <item name="colorPrimaryDark">@color/black</item>
+        <item name="cardBackground">@color/surfaceBlack</item>
+        <item name="cardBorder">@color/cardBorderBlack</item>
+        <item name="glassBackground">@color/glassBlack</item>
+        <item name="glassComposerBackground">@color/glassComposerBlack</item>
+        <item name="pillSearchBackground">@color/pillSearchBlack</item>
     </style>
 
     <style name="PopupTheme.Black">
