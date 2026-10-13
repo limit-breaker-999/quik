@@ -23,20 +23,37 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
-    <style name="AppBaseTheme" parent="Theme.MaterialComponents.NoActionBar">
+    <style name="AppBaseTheme" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/m3_primary_dark</item>
+        <item name="colorOnPrimary">@color/m3_on_primary_dark</item>
+        <item name="colorPrimaryContainer">@color/m3_primary_container_dark</item>
+        <item name="colorOnPrimaryContainer">@color/m3_on_primary_container_dark</item>
+        <item name="colorSecondary">@color/m3_secondary_dark</item>
+        <item name="colorOnSecondary">@color/m3_on_secondary_dark</item>
+        <item name="colorSecondaryContainer">@color/m3_secondary_container_dark</item>
+        <item name="colorOnSecondaryContainer">@color/m3_on_secondary_container_dark</item>
+        <item name="colorSurface">@color/m3_surface_dark</item>
+        <item name="colorOnSurface">@color/m3_on_surface_dark</item>
+        <item name="colorSurfaceVariant">@color/m3_surface_variant_dark</item>
+        <item name="colorOnSurfaceVariant">@color/m3_on_surface_variant_dark</item>
+        <item name="colorSurfaceContainerLowest">@color/m3_surface_container_lowest_dark</item>
+        <item name="colorSurfaceContainerLow">@color/m3_surface_container_low_dark</item>
+        <item name="colorSurfaceContainer">@color/m3_surface_container_dark</item>
+        <item name="colorSurfaceContainerHigh">@color/m3_surface_container_high_dark</item>
+        <item name="colorSurfaceContainerHighest">@color/m3_surface_container_highest_dark</item>
+        <item name="colorOutline">@color/m3_outline_dark</item>
+        <item name="colorOutlineVariant">@color/m3_outline_variant_dark</item>
         <item name="android:divider">@color/separatorDark</item>
         <item name="android:navigationBarColor">@color/backgroundDark</item>
         <item name="android:queryBackground">@color/bubbleDark</item>
         <item name="android:statusBarColor">@color/backgroundDark</item>
-        <item name="android:textColorPrimary">@color/text_primary</item>
-        <item name="android:textColorSecondary">@color/text_secondary</item>
-        <item name="android:textColorTertiary">@color/text_tertiary</item>
+        <item name="android:textColorPrimary">@color/textPrimaryDark</item>
+        <item name="android:textColorSecondary">@color/textSecondaryDark</item>
+        <item name="android:textColorTertiary">@color/textTertiaryDark</item>
         <item name="android:windowBackground">@color/backgroundDark</item>
         <item name="android:windowContentTransitions">true</item>
         <item name="actionBarPopupTheme">@style/PopupTheme</item>
         <item name="bubbleColor">@color/bubbleDark</item>
-        <item name="colorPrimary">@color/backgroundDark</item>
-        <item name="colorPrimaryDark">@color/backgroundDark</item>
         <item name="selectableItemBackground">@drawable/ripple_dark</item>
         <item name="switchThumbEnabled">@color/switchThumbEnabledDark</item>
         <item name="switchThumbDisabled">@color/switchThumbDisabledDark</item>
@@ -47,35 +64,31 @@
         <item name="glassBackground">@color/glassDark</item>
         <item name="glassComposerBackground">@color/glassComposerDark</item>
         <item name="pillSearchBackground">@color/pillSearchDark</item>
-        <item name="colorSurface">@color/surfaceDark</item>
-        <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorOutline">@color/cardBorderDark</item>
-        <item name="colorSecondary">@color/text_secondary</item>
         <item name="windowActionBar">false</item>
     </style>
 
-    <style name="AppThemeDialog" parent="Theme.MaterialComponents.Dialog">
-        <item name="android:textColorPrimary">@color/text_primary</item>
-        <item name="android:textColorSecondary">@color/text_secondary</item>
-        <item name="android:textColorTertiary">@color/text_tertiary</item>
+    <style name="AppThemeDialog" parent="Theme.Material3.Dark.Dialog">
+        <item name="colorPrimary">@color/m3_primary_dark</item>
+        <item name="colorOnPrimary">@color/m3_on_primary_dark</item>
+        <item name="colorSurface">@color/surfaceDark</item>
+        <item name="colorOnSurface">@color/textPrimaryDark</item>
+        <item name="colorOutline">@color/cardBorderDark</item>
+        <item name="android:textColorPrimary">@color/textPrimaryDark</item>
+        <item name="android:textColorSecondary">@color/textSecondaryDark</item>
+        <item name="android:textColorTertiary">@color/textTertiaryDark</item>
         <item name="android:windowBackground">@color/backgroundDark</item>
         <item name="actionBarPopupTheme">@style/PopupTheme</item>
         <item name="bubbleColor">@color/bubbleDark</item>
-        <item name="colorPrimary">@color/backgroundDark</item>
-        <item name="colorPrimaryDark">@color/backgroundDark</item>
         <item name="selectableItemBackground">@drawable/ripple_dark</item>
         <item name="cardBackground">@color/surfaceDark</item>
         <item name="cardBorder">@color/cardBorderDark</item>
         <item name="glassBackground">@color/glassDark</item>
         <item name="glassComposerBackground">@color/glassComposerDark</item>
         <item name="pillSearchBackground">@color/pillSearchDark</item>
-        <item name="colorSurface">@color/surfaceDark</item>
-        <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorOutline">@color/cardBorderDark</item>
         <item name="windowActionBar">false</item>
     </style>
 
-    <style name="PopupTheme" parent="ThemeOverlay.AppCompat">
+    <style name="PopupTheme" parent="ThemeOverlay.Material3.Dark">
         <item name="android:colorBackground">@color/backgroundDark</item>
         <item name="android:textColor">@color/textPrimaryDark</item>
     </style>
@@ -85,32 +98,35 @@
         <item name="android:navigationBarColor">@color/black</item>
         <item name="android:statusBarColor">@color/black</item>
         <item name="android:windowBackground">@color/black</item>
+        <item name="colorSurface">@color/black</item>
+        <item name="colorSurfaceContainerLowest">@color/black</item>
+        <item name="colorSurfaceContainerLow">@color/surfaceBlack</item>
+        <item name="colorSurfaceContainer">@color/surfaceBlack</item>
+        <item name="colorSurfaceContainerHigh">@color/pillSearchBlack</item>
+        <item name="colorSurfaceContainerHighest">@color/pillSearchBlack</item>
+        <item name="colorOutlineVariant">@color/cardBorderBlack</item>
+        <item name="colorSecondaryContainer">@color/m3_secondary_container_black</item>
+        <item name="colorOnSecondaryContainer">@color/m3_on_secondary_container_black</item>
+        <item name="colorOnSurface">@color/m3_on_surface_black</item>
+        <item name="colorOnSurfaceVariant">@color/m3_on_surface_variant_black</item>
         <item name="bubbleColor">@color/bubbleBlack</item>
-        <item name="colorPrimary">@color/black</item>
-        <item name="colorPrimaryDark">@color/black</item>
         <item name="cardBackground">@color/surfaceBlack</item>
         <item name="cardBorder">@color/cardBorderBlack</item>
         <item name="glassBackground">@color/glassBlack</item>
         <item name="glassComposerBackground">@color/glassComposerBlack</item>
         <item name="pillSearchBackground">@color/pillSearchBlack</item>
-        <item name="colorSurface">@color/surfaceBlack</item>
-        <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorOutline">@color/cardBorderBlack</item>
     </style>
 
     <style name="AppThemeDialog.Black" parent="AppThemeDialog">
         <item name="android:windowBackground">@color/black</item>
         <item name="actionBarPopupTheme">@style/PopupTheme.Black</item>
-        <item name="colorPrimary">@color/black</item>
-        <item name="colorPrimaryDark">@color/black</item>
+        <item name="colorSurface">@color/surfaceBlack</item>
+        <item name="colorOutline">@color/cardBorderBlack</item>
         <item name="cardBackground">@color/surfaceBlack</item>
         <item name="cardBorder">@color/cardBorderBlack</item>
         <item name="glassBackground">@color/glassBlack</item>
         <item name="glassComposerBackground">@color/glassComposerBlack</item>
         <item name="pillSearchBackground">@color/pillSearchBlack</item>
-        <item name="colorSurface">@color/surfaceBlack</item>
-        <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorOutline">@color/cardBorderBlack</item>
     </style>
 
     <style name="PopupTheme.Black">

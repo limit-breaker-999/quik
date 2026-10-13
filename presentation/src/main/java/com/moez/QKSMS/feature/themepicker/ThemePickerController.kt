@@ -25,6 +25,8 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import com.jakewharton.rxbinding2.view.clicks
+import com.uber.autodispose.android.lifecycle.scope
+import com.uber.autodispose.autoDisposable
 import dev.octoshrimpy.quik.R
 import dev.octoshrimpy.quik.common.base.QkController
 import dev.octoshrimpy.quik.common.util.Colors
@@ -49,6 +51,7 @@ class ThemePickerController(
     @Inject override lateinit var presenter: ThemePickerPresenter
 
     @Inject lateinit var colors: Colors
+    @Inject lateinit var prefs: dev.octoshrimpy.quik.util.Preferences
     @Inject lateinit var themeAdapter: ThemeAdapter
     @Inject lateinit var themePagerAdapter: ThemePagerAdapter
 
@@ -63,6 +66,18 @@ class ThemePickerController(
     }
 
     override fun onViewCreated() {
+        if (com.google.android.material.color.DynamicColors.isDynamicColorAvailable() && recipientId == 0L) {
+            binding.dynamicColorCard.visibility = View.VISIBLE
+            binding.dynamicColorSwitch.isChecked = prefs.dynamicColor.get()
+            binding.dynamicColorSwitch.setOnCheckedChangeListener { _, isChecked ->
+                if (prefs.dynamicColor.get() != isChecked) {
+                    prefs.dynamicColor.set(isChecked)
+                }
+            }
+        } else {
+            binding.dynamicColorCard.visibility = View.GONE
+        }
+
         binding.pager.offscreenPageLimit = 1
         binding.pager.adapter = themePagerAdapter
         binding.tabs.pager = binding.pager
@@ -78,6 +93,16 @@ class ThemePickerController(
         presenter.bindIntents(this)
         setTitle(R.string.title_theme)
         showBackButton(true)
+
+        if (com.google.android.material.color.DynamicColors.isDynamicColorAvailable() && recipientId == 0L) {
+            prefs.dynamicColor.asObservable()
+                .autoDisposable(scope())
+                .subscribe { enabled ->
+                    if (binding.dynamicColorSwitch.isChecked != enabled) {
+                        binding.dynamicColorSwitch.isChecked = enabled
+                    }
+                }
+        }
 
         themedActivity?.supportActionBar?.let { toolbar ->
             ObjectAnimator.ofFloat(toolbar, "elevation", toolbar.elevation, 0f).start()

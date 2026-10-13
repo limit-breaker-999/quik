@@ -64,21 +64,6 @@ class ConversationsAdapter @Inject constructor(
         val layoutInflater = LayoutInflater.from(parent.context)
         val binding = ConversationListItemBinding.inflate(layoutInflater, parent, false)
 
-        if (viewType == 1) {
-            val textColorPrimary = parent.context.resolveThemeColor(android.R.attr.textColorPrimary)
-
-            binding.title.setTypeface(binding.title.typeface, Typeface.BOLD)
-
-            binding.snippet.setTypeface(binding.snippet.typeface, Typeface.BOLD)
-            binding.snippet.setTextColor(textColorPrimary)
-            binding.snippet.maxLines = 5
-
-            binding.unread.isVisible = true
-
-            binding.date.setTypeface(binding.date.typeface, Typeface.BOLD)
-            binding.date.setTextColor(textColorPrimary)
-        }
-
         return QkBindingViewHolder(binding).apply {
             binding.root.setOnClickListener {
                 val conversation = getItem(adapterPosition) ?: return@setOnClickListener
@@ -100,16 +85,6 @@ class ConversationsAdapter @Inject constructor(
         val conversation = getItem(position) ?: return
         val binding = holder.binding
 
-        // If the last message wasn't incoming, then the colour doesn't really matter anyway
-        val lastMessage = conversation.lastMessage
-        val recipient = when {
-            conversation.recipients.size == 1 || lastMessage == null -> conversation.recipients.firstOrNull()
-            else -> conversation.recipients.find { recipient ->
-                phoneNumberUtils.compare(recipient.address, lastMessage.address)
-            }
-        }
-        val theme = colors.theme(recipient).theme
-
         holder.itemView.isActivated = isSelected(conversation.id)
 
         binding.avatars.recipients = conversation.recipients
@@ -124,13 +99,32 @@ class ConversationsAdapter @Inject constructor(
             else -> conversation.snippet
         }
 
-        // Make the preview in italics if draft
-        if (conversation.draft.isNotEmpty()) binding.snippet.setTypeface(null, Typeface.ITALIC)
+        val isUnread = conversation.unread
+        val colorPrimary = context.resolveThemeColor(R.attr.colorPrimary)
+        val colorOnSurface = context.resolveThemeColor(R.attr.colorOnSurface)
+        val colorOnSurfaceVariant = context.resolveThemeColor(R.attr.colorOnSurfaceVariant)
+
+        if (isUnread) {
+            binding.title.setTypeface(binding.title.typeface, Typeface.BOLD)
+            binding.title.setTextColor(colorOnSurface)
+            binding.snippet.setTypeface(null, if (conversation.draft.isNotEmpty()) Typeface.BOLD_ITALIC else Typeface.BOLD)
+            binding.snippet.setTextColor(colorOnSurface)
+            binding.date.setTypeface(binding.date.typeface, Typeface.BOLD)
+            binding.date.setTextColor(colorPrimary)
+            binding.unread.isVisible = true
+            binding.unread.setTint(colorPrimary)
+        } else {
+            binding.title.setTypeface(Typeface.create(binding.title.typeface, Typeface.NORMAL), Typeface.NORMAL)
+            binding.title.setTextColor(colorOnSurface)
+            binding.snippet.setTypeface(null, if (conversation.draft.isNotEmpty()) Typeface.ITALIC else Typeface.NORMAL)
+            binding.snippet.setTextColor(colorOnSurfaceVariant)
+            binding.date.setTypeface(Typeface.create(binding.date.typeface, Typeface.NORMAL), Typeface.NORMAL)
+            binding.date.setTextColor(colorOnSurfaceVariant)
+            binding.unread.isVisible = false
+        }
 
         binding.scheduled.isVisible = conversation.id in hasScheduledConversation
-
         binding.pinned.isVisible = conversation.pinned
-        binding.unread.setTint(theme)
     }
 
     override fun getItemId(position: Int): Long {

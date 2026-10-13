@@ -103,9 +103,11 @@
     </style>
 
     <style name="DrawerRow">
-        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_height">56dp</item>
         <item name="android:layout_width">match_parent</item>
-        <item name="android:background">?attr/selectableItemBackground</item>
+        <item name="android:layout_marginStart">12dp</item>
+        <item name="android:layout_marginEnd">12dp</item>
+        <item name="android:background">@drawable/drawer_pill_item_background</item>
         <item name="android:gravity">center_vertical</item>
         <item name="android:paddingStart">16dp</item>
         <item name="android:paddingEnd">16dp</item>
@@ -116,15 +118,21 @@
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_weight">1</item>
         <item name="android:lines">1</item>
-        <item name="android:textColor">?android:attr/textColorPrimary</item>
+        <item name="android:textColor">@color/drawer_item_text_color</item>
         <item name="android:textStyle">bold</item>
-        <item name="textSize">secondary</item>
+        <item name="android:textSize">14sp</item>
     </style>
 
     <style name="DrawerIcon">
         <item name="android:layout_height">24dp</item>
         <item name="android:layout_width">24dp</item>
-        <item name="android:layout_marginEnd">32dp</item>
+        <item name="android:layout_marginEnd">24dp</item>
+        <item name="android:tint">@color/drawer_item_icon_tint</item>
+        <item name="tint">@color/drawer_item_icon_tint</item>
+    </style>
+
+    <style name="ShapeAppearance.M3.FAB" parent="ShapeAppearance.Material3.Corner.Large">
+        <item name="cornerSize">16dp</item>
     </style>
 
 </resources>

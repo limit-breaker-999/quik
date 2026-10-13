@@ -28,12 +28,18 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
-        <androidx.appcompat.widget.Toolbar
+        <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
-            style="@style/Toolbar"
+            android:layout_width="0dp"
             android:layout_height="56dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/search_pill_background"
             android:animateLayoutChanges="true"
+            app:contentInsetStart="0dp"
             app:contentInsetStartWithNavigation="0dp"
+            app:navigationIconTint="?attr/colorOnSurfaceVariant"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent">
@@ -41,40 +47,34 @@
             <dev.octoshrimpy.quik.common.widget.QkTextView
                 android:id="@+id/toolbarTitle"
                 style="@style/ToolbarText"
-                android:layout_marginStart="16dp"
-                android:textSize="22sp"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:textSize="20sp"
                 android:textStyle="bold"
-                android:visibility="visible"
+                android:visibility="gone"
                 tools:text="Messages" />
 
-        </androidx.appcompat.widget.Toolbar>
+            <dev.octoshrimpy.quik.common.widget.QkEditText
+                android:id="@+id/toolbarSearch"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@null"
+                android:hint="@string/title_conversations"
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="4dp"
+                android:paddingEnd="12dp"
+                android:textColor="?attr/colorOnSurface"
+                android:textColorHint="?attr/colorOnSurfaceVariant"
+                android:textSize="16sp"
+                android:gravity="center_vertical"
+                android:focusable="true"
+                android:nextFocusRight="@+id/compose" />
 
-        <dev.octoshrimpy.quik.common.widget.QkEditText
-            android:id="@+id/toolbarSearch"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="4dp"
-            android:layout_marginEnd="16dp"
-            android:layout_marginBottom="8dp"
-            android:background="@drawable/rounded_rectangle_24dp"
-            android:backgroundTint="?attr/pillSearchBackground"
-            android:drawableStart="@drawable/ic_search_black_24dp"
-            android:drawablePadding="12dp"
-            android:drawableTint="?android:attr/textColorTertiary"
-            android:hint="@string/title_conversations"
-            android:inputType="text"
-            android:maxLines="1"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textColorHint="?android:attr/textColorTertiary"
-            android:textSize="15sp"
-            android:focusable="true"
-            android:nextFocusRight="@+id/compose"
-            app:layout_constraintTop_toBottomOf="@id/toolbar"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+        </com.google.android.material.appbar.MaterialToolbar>
 
         <dev.octoshrimpy.quik.common.widget.QkTextView
             android:id="@+id/empty"
@@ -85,7 +85,7 @@
             android:gravity="center"
             android:padding="56dp"
             app:layout_constraintBottom_toTopOf="@id/bottom"
-            app:layout_constraintTop_toBottomOf="@id/toolbarSearch"
+            app:layout_constraintTop_toBottomOf="@id/toolbar"
             tools:text="Your conversations will appear here"
             tools:visibility="invisible" />
 
@@ -95,27 +95,25 @@
             android:layout_height="0dp"
             android:clipChildren="false"
             android:clipToPadding="false"
-            android:paddingTop="4dp"
+            android:paddingTop="8dp"
             android:paddingBottom="8dp"
             app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
             app:layout_constraintBottom_toTopOf="@id/bottom"
-            app:layout_constraintTop_toBottomOf="@id/toolbarSearch"
+            app:layout_constraintTop_toBottomOf="@id/toolbar"
             tools:listitem="@layout/conversation_list_item" />
 
-        <ImageView
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/compose"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            style="@style/Widget.Material3.FloatingActionButton.Primary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:layout_margin="16dp"
-            android:background="@drawable/fab_m3_background"
             android:contentDescription="@string/main_fab_cd"
-            android:elevation="6dp"
-            android:padding="16dp"
             android:src="@drawable/ic_add_black_24dp"
+            app:fabSize="normal"
+            app:shapeAppearanceOverlay="@style/ShapeAppearance.M3.FAB"
             app:layout_constraintBottom_toTopOf="@id/bottom"
-            app:layout_constraintEnd_toEndOf="parent"
-            tools:backgroundTint="@color/tools_theme"
-            app:tint="@color/white" />
+            app:layout_constraintEnd_toEndOf="parent" />
 
         <View
             android:id="@+id/bottom"

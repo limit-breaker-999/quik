@@ -666,4 +666,6 @@
     <string name="stt_toast_extra_prompt">Speak your message</string>
 
     <string name="messages_text_share_file_error">Oops! Something went wrong while sharing</string>
+    <string name="settings_theme_dynamic_color_title">Dynamic Color (System)</string>
+    <string name="settings_theme_dynamic_color_summary">Derives colors from your device wallpaper</string>
 </resources>
