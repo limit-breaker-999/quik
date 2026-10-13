@@ -91,7 +91,6 @@
     <string name="compose_title_selected">%d انتخاب شده</string>
     <string name="compose_subtitle_results">نتایج %1$d از %2$d</string>
     <string name="compose_send_group_title">فرستادن پیام گروهی</string>
-    <string name="compose_send_group_summary">گیرندگان اود پاسخ‌ها برای همه هویدا خواهد بود</string>
     <string name="compose_messages_empty">این آغاز گفتگوی شماست. چیز خوبی بگویید!</string>
     <string name="compose_vcard_label">کارت تماس</string>
     <string name="compose_scheduled_for">زمان برنامه‌ریزی‌شده:</string>
@@ -179,11 +178,6 @@
     <string name="scheduled_empty_message_3_timestamp">فرستادن در ۲ دی‌ماه</string>
     <string name="scheduled_compose_cd">پیامی را برنامه‌ریزی کنید</string>
     <string name="scheduled_options_title">پیام برنامه‌ریزی شده</string>
-    <string-array name="scheduled_options">
-        <item>هم اکنون بفرست</item>
-        <item>کپی متن</item>
-        <item>حذف</item>
-    </string-array>
     <string name="settings_category_appearance">ظاهر</string>
     <string name="settings_category_general">عمومی</string>
     <string name="settings_category_qkreply">پاسخ سریع</string>

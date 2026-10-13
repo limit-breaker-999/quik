@@ -118,6 +118,33 @@ class EditAutomationPresenter @Inject constructor(
             .withLatestFrom(state) { _, s -> s }
             .autoDisposable(view.scope())
             .subscribe { s ->
+                // Validate action-specific required fields before saving so the
+                // rule doesn't fire-and-fail silently at runtime (BUG-032)
+                when (s.action) {
+                    AutomationRule.ACTION_FORWARD_HTTP -> {
+                        if (!s.forwardToUrl.startsWith("http://") && !s.forwardToUrl.startsWith("https://")) {
+                            Timber.w("Rejecting save: invalid webhook URL '${s.forwardToUrl}'")
+                            view.showValidationError(VALIDATION_URL)
+                            return@subscribe
+                        }
+                    }
+                    AutomationRule.ACTION_FORWARD_SMS -> {
+                        if (s.forwardToPhone.isBlank()) {
+                            Timber.w("Rejecting save: empty forward phone")
+                            view.showValidationError(VALIDATION_PHONE)
+                            return@subscribe
+                        }
+                    }
+                    AutomationRule.ACTION_AUTO_REPLY -> {
+                        if (s.replyTemplate.isBlank()) {
+                            Timber.w("Rejecting save: empty reply template")
+                            view.showValidationError(VALIDATION_TEMPLATE)
+                            return@subscribe
+                        }
+                    }
+                    else -> Unit
+                }
+
                 val fallbackName = when (s.action) {
                     AutomationRule.ACTION_DELETE -> "Auto-delete rule"
                     AutomationRule.ACTION_ARCHIVE -> "Auto-archive rule"
@@ -157,6 +184,10 @@ class EditAutomationPresenter @Inject constructor(
 
 
     companion object {
+        // Validation error types surfaced to the view on save
+        const val VALIDATION_URL = "url"
+        const val VALIDATION_PHONE = "phone"
+        const val VALIDATION_TEMPLATE = "template"
         // (label, pattern) pairs
         val REGEX_PRESETS = listOf(
             "OTP (generic)" to "(?i)\\b\\d{4,8}\\b",

@@ -90,7 +90,6 @@
     <string name="compose_title_selected">%d 개 선택됨</string>
     <string name="compose_subtitle_results">%2$d 중 %1$d 결과</string>
     <string name="compose_send_group_title">그룹 메시지 보내기</string>
-    <string name="compose_send_group_summary">받는 사람 및 답장이 모든 사람에게 표시됩니다.</string>
     <string name="compose_messages_empty">새로운 대화가 시작되었어요! 대화를 해보세요!</string>
     <string name="compose_vcard_label">연락처</string>
     <string name="compose_scheduled_for">예정</string>
@@ -180,11 +179,6 @@
     <string name="scheduled_empty_message_3_timestamp">12월 23일에 보냅니다.</string>
     <string name="scheduled_compose_cd">메시지 예약 전송하기</string>
     <string name="scheduled_options_title">예약된 메시지</string>
-    <string-array name="scheduled_options">
-        <item>지금 보내기</item>
-        <item>텍스트 복사하기</item>
-        <item>삭제</item>
-    </string-array>
     <string name="settings_category_appearance">디자인</string>
     <string name="settings_category_general">일반 설정</string>
     <string name="settings_category_qkreply">빠른 응답</string>

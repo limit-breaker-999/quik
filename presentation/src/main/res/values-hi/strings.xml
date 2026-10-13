@@ -91,7 +91,6 @@
     <string name="compose_title_selected">%d चयनित</string>
     <string name="compose_subtitle_results">%1$d के %2$d परिणाम</string>
     <string name="compose_send_group_title">समूह संदेश के रूप में भेजें</string>
-    <string name="compose_send_group_summary">प्राप्तकर्ता और उत्तर सभी को दिखाई देंगे</string>
     <string name="compose_messages_empty">यह आपकी बातचीत की शुरुआत है । कुछ अच्छा कहिये!</string>
     <string name="compose_vcard_label">संपर्क कार्ड</string>
     <string name="compose_scheduled_for">निर्धारित समय:</string>
@@ -181,11 +180,6 @@
     <string name="scheduled_empty_message_3_timestamp">23 दिसंबर को भेजा जा रहा है </string>
     <string name="scheduled_compose_cd">एक संदेश अनुसूचित करें</string>
     <string name="scheduled_options_title">निर्धारित संदेश</string>
-    <string-array name="scheduled_options">
-        <item>अभी भेजें</item>
-        <item>टेक्स्ट कॉपी करें</item>
-        <item>मिटाएँ</item>
-    </string-array>
     <string name="settings_category_appearance">दिखावट</string>
     <string name="settings_category_general">सामान्य</string>
     <string name="settings_category_qkreply">QK उत्तर</string>

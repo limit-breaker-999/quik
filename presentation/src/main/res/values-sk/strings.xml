@@ -93,7 +93,6 @@
     <string name="compose_title_selected">%d vybratých</string>
     <string name="compose_subtitle_results">%1$d z %2$d výsledkov</string>
     <string name="compose_send_group_title">Poslať ako skupinovú správu</string>
-    <string name="compose_send_group_summary">Príjemcovia a odpovede budú viditeľné všetkým</string>
     <string name="compose_messages_empty">Toto je začiatok vašej konverzácie. Napíšte niečo pekného!</string>
     <string name="compose_vcard_label">Karta kontaktu</string>
     <string name="compose_scheduled_for">Naplánované na</string>
@@ -183,11 +182,6 @@
     <string name="scheduled_empty_message_3_timestamp">Pošle sa 23. decembra</string>
     <string name="scheduled_compose_cd">Naplánovať správu</string>
     <string name="scheduled_options_title">Naplánovaná správa</string>
-    <string-array name="scheduled_options">
-        <item>Odoslať teraz</item>
-        <item>Kopírovať text</item>
-        <item>Odstrániť</item>
-    </string-array>
     <string name="settings_category_appearance">Vzhľad</string>
     <string name="settings_category_general">Všeobecné</string>
     <string name="settings_category_qkreply">Rýchla odpoveď</string>

@@ -3,6 +3,9 @@ package dev.octoshrimpy.quik.feature.settings.automations
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.app.AlertDialog
+import io.reactivex.subjects.PublishSubject
+import io.reactivex.subjects.Subject
 import com.bluelinelabs.conductor.RouterTransaction
 import com.jakewharton.rxbinding2.view.clicks
 import dev.octoshrimpy.quik.R
@@ -21,7 +24,7 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
 
     @Inject override lateinit var presenter: AutomationsPresenter
     @Inject lateinit var colors: Colors
-
+    private val deleteConfirmedSubject: Subject<Long> = PublishSubject.create()
     private val adapter = AutomationRulesAdapter()
 
     init {
@@ -56,9 +59,21 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
 
     override fun editRuleClicks(): Observable<Long> = adapter.editClicks
 
+    override fun deleteRuleConfirmed(): Observable<Long> = deleteConfirmedSubject
     override fun deleteRuleClicks(): Observable<Long> = adapter.deleteClicks
-
     override fun toggleRuleClicks(): Observable<Long> = adapter.toggleClicks
+
+    override fun confirmDelete(ruleId: Long) {
+        val act = activity ?: return
+        AlertDialog.Builder(act)
+            .setTitle(R.string.automation_delete_confirm_title)
+            .setMessage(R.string.automation_delete_confirm_message)
+            .setPositiveButton(R.string.button_delete) { _, _ ->
+                deleteConfirmedSubject.onNext(ruleId)
+            }
+            .setNegativeButton(R.string.button_cancel, null)
+            .show()
+    }
 
     override fun showEditRule(ruleId: Long) {
         router.pushController(

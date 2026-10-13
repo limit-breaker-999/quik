@@ -91,7 +91,6 @@
     <string name="compose_title_selected">%d kijelölve</string>
     <string name="compose_subtitle_results">%1$d. a %2$d találatból</string>
     <string name="compose_send_group_title">Küldés csoportos üzenetként</string>
-    <string name="compose_send_group_summary">A címzettek és a válaszok mindenkinek láthatóak lesznek</string>
     <string name="compose_messages_empty">Ez a társalgás kezdete. Írjon valami kedveset!</string>
     <string name="compose_vcard_label">Névjegy</string>
     <string name="compose_scheduled_for">Ütemezett idő:</string>
@@ -181,11 +180,6 @@
     <string name="scheduled_empty_message_3_timestamp">Küldés december 23-án</string>
     <string name="scheduled_compose_cd">Üzenet ütemezése</string>
     <string name="scheduled_options_title">Ütemezett üzenet</string>
-    <string-array name="scheduled_options">
-        <item>Küldés most</item>
-        <item>Szöveg másolása</item>
-        <item>Törlés</item>
-    </string-array>
     <string name="settings_category_appearance">Megjelenés</string>
     <string name="settings_category_general">Általános</string>
     <string name="settings_category_qkreply">QK válasz</string>

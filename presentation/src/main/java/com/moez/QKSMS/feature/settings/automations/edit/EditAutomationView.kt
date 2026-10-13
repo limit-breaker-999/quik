@@ -23,6 +23,7 @@ interface EditAutomationView : QkViewContract<EditAutomationState> {
     fun saveClicks(): Observable<*>
     fun presetClicks(): Observable<*>
     fun showPresets(presets: List<Pair<String, String>>)
+    fun showValidationError(error: String)
     fun close()
 }
 

@@ -22,6 +22,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.util.AttributeSet
 import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.theme.overlay.MaterialThemeOverlay
 import dev.octoshrimpy.quik.R
 import dev.octoshrimpy.quik.common.util.Colors
 import dev.octoshrimpy.quik.common.util.extensions.resolveThemeColor
@@ -33,7 +34,16 @@ class QkSwitch @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = com.google.android.material.R.attr.materialSwitchStyle
-) : MaterialSwitch(context, attrs, defStyleAttr) {
+) : MaterialSwitch(
+    MaterialThemeOverlay.wrap(
+        context,
+        attrs,
+        defStyleAttr,
+        com.google.android.material.R.style.Widget_Material3_CompoundButton_MaterialSwitch
+    ),
+    attrs,
+    defStyleAttr
+) {
 
     @Inject lateinit var colors: Colors
     @Inject lateinit var prefs: Preferences
@@ -48,30 +58,43 @@ class QkSwitch @JvmOverloads constructor(
         super.onAttachedToWindow()
 
         if (!isInEditMode) {
-            val themeColor = colors.theme().theme
-            val onThemeColor = colors.theme().textPrimary
+            try {
+                val themeColor = colors.theme().theme
+                val onThemeColor = colors.theme().textPrimary
 
-            val thumbStates = arrayOf(
-                intArrayOf(-android.R.attr.state_enabled),
-                intArrayOf(android.R.attr.state_checked),
-                intArrayOf()
-            )
-            thumbTintList = ColorStateList(thumbStates, intArrayOf(
-                context.resolveThemeColor(R.attr.switchThumbDisabled),
-                onThemeColor,
-                context.resolveThemeColor(R.attr.switchThumbEnabled)
-            ))
+                val thumbDisabled = context.resolveThemeColor(R.attr.switchThumbDisabled)
+                val thumbEnabled = context.resolveThemeColor(R.attr.switchThumbEnabled)
+                val trackDisabled = context.resolveThemeColor(R.attr.switchTrackDisabled)
+                val trackEnabled = context.resolveThemeColor(R.attr.switchTrackEnabled)
 
-            val trackStates = arrayOf(
-                intArrayOf(-android.R.attr.state_enabled),
-                intArrayOf(android.R.attr.state_checked),
-                intArrayOf()
-            )
-            trackTintList = ColorStateList(trackStates, intArrayOf(
-                context.resolveThemeColor(R.attr.switchTrackDisabled),
-                themeColor,
-                context.resolveThemeColor(R.attr.switchTrackEnabled)
-            ))
+                if (thumbDisabled != 0 || thumbEnabled != 0) {
+                    val thumbStates = arrayOf(
+                        intArrayOf(-android.R.attr.state_enabled),
+                        intArrayOf(android.R.attr.state_checked),
+                        intArrayOf()
+                    )
+                    thumbTintList = ColorStateList(thumbStates, intArrayOf(
+                        thumbDisabled,
+                        onThemeColor,
+                        thumbEnabled
+                    ))
+                }
+
+                if (trackDisabled != 0 || trackEnabled != 0) {
+                    val trackStates = arrayOf(
+                        intArrayOf(-android.R.attr.state_enabled),
+                        intArrayOf(android.R.attr.state_checked),
+                        intArrayOf()
+                    )
+                    trackTintList = ColorStateList(trackStates, intArrayOf(
+                        trackDisabled,
+                        themeColor,
+                        trackEnabled
+                    ))
+                }
+            } catch (e: Exception) {
+                // Keep default M3 switch styling if custom tinting fails
+            }
         }
     }
 }

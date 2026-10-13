@@ -57,7 +57,7 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
 
         val messageId = inputData.getLong(INPUT_DATA_KEY_MESSAGE_ID, -1)
         if (messageId < 0) {
-            Timber.v("failed. message id was {messageId}")
+            Timber.v("failed. message id was $messageId")
             return Result.failure(inputData)
         }
 

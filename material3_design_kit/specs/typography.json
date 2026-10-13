@@ -1,0 +1,102 @@
+{
+  "description": "Material 3 Typescale Tokens (Roboto / Android System Font)",
+  "scales": {
+    "display_large": {
+      "size_sp": 57,
+      "line_height_sp": 64,
+      "tracking": -0.25,
+      "weight": 400
+    },
+    "display_medium": {
+      "size_sp": 45,
+      "line_height_sp": 52,
+      "tracking": 0,
+      "weight": 400
+    },
+    "display_small": {
+      "size_sp": 36,
+      "line_height_sp": 44,
+      "tracking": 0,
+      "weight": 400
+    },
+    "headline_large": {
+      "size_sp": 32,
+      "line_height_sp": 40,
+      "tracking": 0,
+      "weight": 400
+    },
+    "headline_medium": {
+      "size_sp": 28,
+      "line_height_sp": 36,
+      "tracking": 0,
+      "weight": 400
+    },
+    "headline_small": {
+      "size_sp": 24,
+      "line_height_sp": 32,
+      "tracking": 0,
+      "weight": 400
+    },
+    "title_large": {
+      "size_sp": 22,
+      "line_height_sp": 28,
+      "tracking": 0,
+      "weight": 400,
+      "usage": "Top app bar / Messages title"
+    },
+    "title_medium": {
+      "size_sp": 16,
+      "line_height_sp": 24,
+      "tracking": 0.15,
+      "weight": 500,
+      "usage": "Conversation contact name, card header"
+    },
+    "title_small": {
+      "size_sp": 14,
+      "line_height_sp": 20,
+      "tracking": 0.1,
+      "weight": 500
+    },
+    "body_large": {
+      "size_sp": 16,
+      "line_height_sp": 24,
+      "tracking": 0.5,
+      "weight": 400,
+      "usage": "Message text in bubbles"
+    },
+    "body_medium": {
+      "size_sp": 14,
+      "line_height_sp": 20,
+      "tracking": 0.25,
+      "weight": 400,
+      "usage": "Conversation snippet text, settings summaries"
+    },
+    "body_small": {
+      "size_sp": 12,
+      "line_height_sp": 16,
+      "tracking": 0.4,
+      "weight": 400,
+      "usage": "Timestamp, unread badges"
+    },
+    "label_large": {
+      "size_sp": 14,
+      "line_height_sp": 20,
+      "tracking": 0.1,
+      "weight": 500,
+      "usage": "Button labels, action text"
+    },
+    "label_medium": {
+      "size_sp": 12,
+      "line_height_sp": 16,
+      "tracking": 0.5,
+      "weight": 500,
+      "usage": "Drawer badges, category chips"
+    },
+    "label_small": {
+      "size_sp": 11,
+      "line_height_sp": 16,
+      "tracking": 0.5,
+      "weight": 500
+    }
+  }
+}

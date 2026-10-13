@@ -95,7 +95,6 @@
     <string name="compose_title_selected">%d مختارة</string>
     <string name="compose_subtitle_results">%1$d من %2$d النتائج</string>
     <string name="compose_send_group_title">إرسال رسالة جماعية</string>
-    <string name="compose_send_group_summary">المتلقون والردود سيكونان مرئيين للجميع</string>
     <string name="compose_messages_empty">هذا أول المحادثة. قل شيئا لطيفاً!</string>
     <string name="compose_vcard_label">بطاقة جهة الاتصال</string>
     <string name="compose_scheduled_for">الموعد المحدد:</string>
@@ -185,11 +184,6 @@
     <string name="scheduled_empty_message_3_timestamp">الإرسال في 23 ديسمبر</string>
     <string name="scheduled_compose_cd">جدولة رسالة</string>
     <string name="scheduled_options_title">الرسالة المجدولة</string>
-    <string-array name="scheduled_options">
-        <item>أرسل الآن</item>
-        <item>نسخ النص</item>
-        <item>حذف</item>
-    </string-array>
     <string name="settings_category_appearance">المظهر</string>
     <string name="settings_category_general">عام</string>
     <string name="settings_category_qkreply">رد QK</string>

@@ -92,7 +92,6 @@
     <string name="compose_title_selected">%d selezionati</string>
     <string name="compose_subtitle_results">%1$d di %2$d risultati</string>
     <string name="compose_send_group_title">Invia come messaggio di gruppo</string>
-    <string name="compose_send_group_summary">I destinatari e le risposte saranno visibili a tutti</string>
     <string name="compose_messages_empty">Questo è l\'inizio della tua conversazione. Dì qualcosa di carino!</string>
     <string name="compose_vcard_label">Scheda contatto</string>
     <string name="compose_scheduled_for">Orario programmato:</string>
@@ -182,11 +181,6 @@
     <string name="scheduled_empty_message_3_timestamp">Invio il 23 dicembre </string>
     <string name="scheduled_compose_cd">Schedula un messaggio</string>
     <string name="scheduled_options_title">Messaggio pianificato</string>
-    <string-array name="scheduled_options">
-        <item>Invia ora</item>
-        <item>Copia testo</item>
-        <item>Cancella</item>
-    </string-array>
     <string name="settings_category_appearance">Aspetto</string>
     <string name="settings_category_general">Generale</string>
     <string name="settings_category_qkreply">Risposta QK</string>

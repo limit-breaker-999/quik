@@ -93,7 +93,6 @@
     <string name="compose_title_selected">%d izbran</string>
     <string name="compose_subtitle_results">%1$d od %2$d rezultatov</string>
     <string name="compose_send_group_title">Pošlji kot skupinsko sporočilo</string>
-    <string name="compose_send_group_summary">Prejemniki in odgovori bodo vidni vsem</string>
     <string name="compose_messages_empty">To je začetek vašega pogovora. Povej nekaj lepega!</string>
     <string name="compose_vcard_label">Kontaktna kartica</string>
     <string name="compose_scheduled_for">Načrtovano za</string>
@@ -183,11 +182,6 @@
     <string name="scheduled_empty_message_3_timestamp">Pošiljanje na 23. December</string>
     <string name="scheduled_compose_cd">Načrtuj sporočilo</string>
     <string name="scheduled_options_title">Načrtovano sporočilo</string>
-    <string-array name="scheduled_options">
-        <item>Pošlji sedaj</item>
-        <item>Kopiraj besedilo</item>
-        <item>Izbriši</item>
-    </string-array>
     <string name="settings_category_appearance">Izgled</string>
     <string name="settings_category_general">Glavno</string>
     <string name="settings_category_qkreply">QK Odgovor</string>

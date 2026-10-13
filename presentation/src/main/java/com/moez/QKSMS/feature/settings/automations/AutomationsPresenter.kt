@@ -25,7 +25,13 @@ class AutomationsPresenter @Inject constructor(
             .autoDisposable(view.scope())
             .subscribe { ruleId -> view.showEditRule(ruleId) }
 
+        // Raw delete clicks only ask for confirmation; the confirmed stream
+        // performs the destructive action (BUG-083)
         view.deleteRuleClicks()
+            .autoDisposable(view.scope())
+            .subscribe { ruleId -> view.confirmDelete(ruleId) }
+
+        view.deleteRuleConfirmed()
             .observeOn(Schedulers.io())
             .doOnNext(automationRepo::deleteRule)
             .subscribeOn(Schedulers.io())

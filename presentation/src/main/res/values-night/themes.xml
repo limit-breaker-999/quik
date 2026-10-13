@@ -23,7 +23,7 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
-    <style name="AppBaseTheme" parent="Theme.AppCompat.NoActionBar">
+    <style name="AppBaseTheme" parent="Theme.MaterialComponents.NoActionBar">
         <item name="android:divider">@color/separatorDark</item>
         <item name="android:navigationBarColor">@color/backgroundDark</item>
         <item name="android:queryBackground">@color/bubbleDark</item>
@@ -47,10 +47,14 @@
         <item name="glassBackground">@color/glassDark</item>
         <item name="glassComposerBackground">@color/glassComposerDark</item>
         <item name="pillSearchBackground">@color/pillSearchDark</item>
+        <item name="colorSurface">@color/surfaceDark</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOutline">@color/cardBorderDark</item>
+        <item name="colorSecondary">@color/text_secondary</item>
         <item name="windowActionBar">false</item>
     </style>
 
-    <style name="AppThemeDialog" parent="Theme.AppCompat.Dialog">
+    <style name="AppThemeDialog" parent="Theme.MaterialComponents.Dialog">
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="android:textColorTertiary">@color/text_tertiary</item>
@@ -65,6 +69,9 @@
         <item name="glassBackground">@color/glassDark</item>
         <item name="glassComposerBackground">@color/glassComposerDark</item>
         <item name="pillSearchBackground">@color/pillSearchDark</item>
+        <item name="colorSurface">@color/surfaceDark</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOutline">@color/cardBorderDark</item>
         <item name="windowActionBar">false</item>
     </style>
 
@@ -74,7 +81,7 @@
     </style>
 
     <!-- Black theme -->
-    <style name="AppTheme.Black">
+    <style name="AppTheme.Black" parent="AppTheme">
         <item name="android:navigationBarColor">@color/black</item>
         <item name="android:statusBarColor">@color/black</item>
         <item name="android:windowBackground">@color/black</item>
@@ -86,9 +93,12 @@
         <item name="glassBackground">@color/glassBlack</item>
         <item name="glassComposerBackground">@color/glassComposerBlack</item>
         <item name="pillSearchBackground">@color/pillSearchBlack</item>
+        <item name="colorSurface">@color/surfaceBlack</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOutline">@color/cardBorderBlack</item>
     </style>
 
-    <style name="AppThemeDialog.Black">
+    <style name="AppThemeDialog.Black" parent="AppThemeDialog">
         <item name="android:windowBackground">@color/black</item>
         <item name="actionBarPopupTheme">@style/PopupTheme.Black</item>
         <item name="colorPrimary">@color/black</item>
@@ -98,6 +108,9 @@
         <item name="glassBackground">@color/glassBlack</item>
         <item name="glassComposerBackground">@color/glassComposerBlack</item>
         <item name="pillSearchBackground">@color/pillSearchBlack</item>
+        <item name="colorSurface">@color/surfaceBlack</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOutline">@color/cardBorderBlack</item>
     </style>
 
     <style name="PopupTheme.Black">

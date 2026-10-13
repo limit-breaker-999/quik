@@ -1,0 +1,63 @@
+{
+  "elevation": {
+    "level_0": {
+      "dp": 0,
+      "tint_opacity": 0.0,
+      "usage": "Flat list items, screen background"
+    },
+    "level_1": {
+      "dp": 1,
+      "tint_opacity": 0.05,
+      "usage": "Cards, small top app bar on scroll"
+    },
+    "level_2": {
+      "dp": 3,
+      "tint_opacity": 0.08,
+      "usage": "Pill search bar, navigation drawer"
+    },
+    "level_3": {
+      "dp": 6,
+      "tint_opacity": 0.11,
+      "usage": "Compose FAB, dialogs"
+    },
+    "level_4": {
+      "dp": 8,
+      "tint_opacity": 0.12,
+      "usage": "Active sheets, floating toolbars"
+    },
+    "level_5": {
+      "dp": 12,
+      "tint_opacity": 0.14,
+      "usage": "Full modal overlays"
+    }
+  },
+  "shape": {
+    "none": {
+      "radius_dp": 0
+    },
+    "extra_small": {
+      "radius_dp": 4,
+      "usage": "Input fields, small badges"
+    },
+    "small": {
+      "radius_dp": 8,
+      "usage": "Chips, snackbars"
+    },
+    "medium": {
+      "radius_dp": 12,
+      "usage": "Cards, small alert dialogs"
+    },
+    "large": {
+      "radius_dp": 16,
+      "usage": "Floating action button (FAB), settings cards, modal sheets"
+    },
+    "extra_large": {
+      "radius_dp": 28,
+      "usage": "Dialogs, full modal containers"
+    },
+    "full": {
+      "radius_dp": 9999,
+      "usage": "Pill search bar, switch track/thumb, avatar circles"
+    }
+  }
+}

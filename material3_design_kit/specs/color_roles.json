@@ -1,0 +1,120 @@
+{
+  "description": "Material 3 System Color Roles for Light and Dark Schemes",
+  "source": "Google Material 3 v0.192 / Android Material Components 1.12.0",
+  "roles": {
+    "primary": {
+      "light": "#6750A4",
+      "dark": "#D0BCFF",
+      "android_attr": "?attr/colorPrimary",
+      "usage": "High-emphasis fills, active toggles, primary actions, floating action buttons"
+    },
+    "on_primary": {
+      "light": "#FFFFFF",
+      "dark": "#381E72",
+      "android_attr": "?attr/colorOnPrimary",
+      "usage": "Text and icons displayed on top of primary"
+    },
+    "primary_container": {
+      "light": "#EADDFF",
+      "dark": "#4F378B",
+      "android_attr": "?attr/colorPrimaryContainer",
+      "usage": "Lower-emphasis container fills, search pills, selected navigation highlights"
+    },
+    "on_primary_container": {
+      "light": "#21005D",
+      "dark": "#EADDFF",
+      "android_attr": "?attr/colorOnPrimaryContainer",
+      "usage": "Text and icons displayed on primary_container"
+    },
+    "secondary": {
+      "light": "#625B71",
+      "dark": "#CCC2DC",
+      "android_attr": "?attr/colorSecondary",
+      "usage": "Less prominent components like filter chips and secondary buttons"
+    },
+    "on_secondary": {
+      "light": "#FFFFFF",
+      "dark": "#332D41",
+      "android_attr": "?attr/colorOnSecondary",
+      "usage": "Text and icons on secondary"
+    },
+    "secondary_container": {
+      "light": "#E8DEF8",
+      "dark": "#4A4458",
+      "android_attr": "?attr/colorSecondaryContainer",
+      "usage": "Navigation drawer selected pill, unselected toggle containers"
+    },
+    "on_secondary_container": {
+      "light": "#1D192B",
+      "dark": "#E8DEF8",
+      "android_attr": "?attr/colorOnSecondaryContainer",
+      "usage": "Text and icons on secondary_container"
+    },
+    "surface": {
+      "light": "#FEF7FF",
+      "dark": "#141218",
+      "android_attr": "?attr/colorSurface",
+      "usage": "Screen backgrounds and flat surfaces"
+    },
+    "on_surface": {
+      "light": "#1D1B20",
+      "dark": "#E6E0E9",
+      "android_attr": "?attr/colorOnSurface",
+      "usage": "Primary body text and icons on surface"
+    },
+    "surface_variant": {
+      "light": "#E7E0EC",
+      "dark": "#49454F",
+      "android_attr": "?attr/colorSurfaceVariant",
+      "usage": "Divider backgrounds, subtle container surfaces"
+    },
+    "on_surface_variant": {
+      "light": "#49454F",
+      "dark": "#CAC4D0",
+      "android_attr": "?attr/colorOnSurfaceVariant",
+      "usage": "Secondary text, metadata, subtle icons, placeholder hints"
+    },
+    "surface_container_lowest": {
+      "light": "#FFFFFF",
+      "dark": "#0F0D13",
+      "android_attr": "?attr/colorSurfaceContainerLowest",
+      "usage": "Lowest elevation surface in layered layouts"
+    },
+    "surface_container_low": {
+      "light": "#F7F2FA",
+      "dark": "#1D1B20",
+      "android_attr": "?attr/colorSurfaceContainerLow",
+      "usage": "Card backgrounds, drawer sheet surface"
+    },
+    "surface_container": {
+      "light": "#F3EDF7",
+      "dark": "#211F26",
+      "android_attr": "?attr/colorSurfaceContainer",
+      "usage": "Standard surface container for cards and dialogs"
+    },
+    "surface_container_high": {
+      "light": "#ECE6F0",
+      "dark": "#2B2930",
+      "android_attr": "?attr/colorSurfaceContainerHigh",
+      "usage": "Elevated search bars and bottom sheets"
+    },
+    "surface_container_highest": {
+      "light": "#E6E0E9",
+      "dark": "#36343B",
+      "android_attr": "?attr/colorSurfaceContainerHighest",
+      "usage": "Search bar pill background, unselected switch tracks"
+    },
+    "outline": {
+      "light": "#79747E",
+      "dark": "#938F99",
+      "android_attr": "?attr/colorOutline",
+      "usage": "Card borders, unselected switch thumbs, input strokes"
+    },
+    "outline_variant": {
+      "light": "#CAC4D0",
+      "dark": "#49454F",
+      "android_attr": "?attr/colorOutlineVariant",
+      "usage": "Subtle borders, list item dividers"
+    }
+  }
+}
