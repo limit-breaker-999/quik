@@ -22,7 +22,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?android:attr/windowBackground"
+    android:background="@drawable/drawer_sheet_background"
     android:clickable="true"
     android:focusable="true">
 
@@ -31,7 +31,25 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingTop="8dp"
-        android:paddingBottom="8dp">
+        android:paddingBottom="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="72dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp">
+
+            <dev.octoshrimpy.quik.common.widget.QkTextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/app_title_messages"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/inbox"
@@ -78,8 +96,7 @@
 
             <ImageView
                 style="@style/DrawerIcon"
-                android:src="@drawable/ic_import_export_black_24dp"
-                app:tint="?android:attr/textColorSecondary" />
+                android:src="@drawable/ic_import_export_black_24dp" />
 
             <dev.octoshrimpy.quik.common.widget.QkTextView
                 style="@style/DrawerText"
@@ -105,8 +122,7 @@
 
             <ImageView
                 style="@style/DrawerIcon"
-                android:src="@drawable/ic_event_black_24dp"
-                app:tint="?android:attr/textColorSecondary" />
+                android:src="@drawable/ic_event_black_24dp" />
 
             <dev.octoshrimpy.quik.common.widget.QkTextView
                 style="@style/DrawerText"
@@ -132,8 +148,7 @@
 
             <ImageView
                 style="@style/DrawerIcon"
-                android:src="@drawable/ic_block_white_24dp"
-                app:tint="?android:attr/textColorSecondary" />
+                android:src="@drawable/ic_block_white_24dp" />
 
             <dev.octoshrimpy.quik.common.widget.QkTextView
                 style="@style/DrawerText"
@@ -147,8 +162,7 @@
 
             <ImageView
                 style="@style/DrawerIcon"
-                android:src="@drawable/dashboard_2_gear"
-                app:tint="?android:attr/textColorSecondary" />
+                android:src="@drawable/dashboard_2_gear" />
 
             <dev.octoshrimpy.quik.common.widget.QkTextView
                 style="@style/DrawerText"
@@ -169,8 +183,7 @@
 
             <ImageView
                 style="@style/DrawerIcon"
-                android:src="@drawable/ic_settings_black_24dp"
-                app:tint="?android:attr/textColorSecondary" />
+                android:src="@drawable/ic_settings_black_24dp" />
 
             <dev.octoshrimpy.quik.common.widget.QkTextView
                 style="@style/DrawerText"
@@ -184,8 +197,7 @@
 
             <ImageView
                 style="@style/DrawerIcon"
-                android:src="@drawable/ic_info_black_24dp"
-                app:tint="?android:attr/textColorSecondary" />
+                android:src="@drawable/ic_info_black_24dp" />
 
             <dev.octoshrimpy.quik.common.widget.QkTextView
                 style="@style/DrawerText"
@@ -198,7 +210,7 @@
 <!--            style="@style/DrawerRow">-->
 
 <!--            <ImageView-->
-<!--                style="@style/DrawerIcon"-->
+<!--                style="@style/DrawerIcon-->
 <!--                android:src="@drawable/ic_star_black_24dp"-->
 <!--                android:tint="?android:attr/textColorSecondary" />-->
 
@@ -213,7 +225,7 @@
 <!--            style="@style/DrawerRow">-->
 
 <!--            <ImageView-->
-<!--                style="@style/DrawerIcon"-->
+<!--                style="@style/DrawerIcon-->
 <!--                android:src="@drawable/ic_help_black_24dp"-->
 <!--                android:tint="?android:attr/textColorSecondary" />-->
 
@@ -229,8 +241,7 @@
 
             <ImageView
                 style="@style/DrawerIcon"
-                android:src="@drawable/ic_people_black_24dp"
-                app:tint="?android:attr/textColorSecondary" />
+                android:src="@drawable/ic_people_black_24dp" />
 
             <dev.octoshrimpy.quik.common.widget.QkTextView
                 style="@style/DrawerText"
@@ -242,11 +253,10 @@
             android:id="@+id/plusBanner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_marginTop="8dp"
-            android:layout_marginEnd="8dp"
-            android:background="@drawable/rounded_rectangle_outline_2dp"
-            android:backgroundTint="?android:attr/divider"
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/m3_card_background"
             android:foreground="?attr/selectableItemBackground"
             android:padding="16dp">
 
@@ -302,11 +312,10 @@
             android:id="@+id/rateLayout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_marginTop="8dp"
-            android:layout_marginEnd="8dp"
-            android:background="@drawable/rounded_rectangle_outline_2dp"
-            android:backgroundTint="?android:attr/divider">
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/m3_card_background">
 
             <ImageView
                 android:id="@+id/rateIcon"

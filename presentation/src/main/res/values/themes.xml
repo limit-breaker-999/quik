@@ -25,7 +25,7 @@
     <attr name="switchTrackEnabled" format="color" />
     <attr name="switchTrackDisabled" format="color" />
 
-    <style name="AppLaunchTheme" parent="Theme.MaterialComponents.NoActionBar">
+    <style name="AppLaunchTheme" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:navigationBarColor">@color/backgroundDark</item>
         <item name="android:statusBarColor">@color/backgroundDark</item>
         <item name="android:windowBackground">@color/backgroundDark</item>
@@ -36,19 +36,36 @@
         <item name="android:windowLightStatusBar">true</item>
     </style>
 
-    <style name="AppBaseTheme" parent="Theme.MaterialComponents.Light.NoActionBar">
+    <style name="AppBaseTheme" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/m3_primary_light</item>
+        <item name="colorOnPrimary">@color/m3_on_primary_light</item>
+        <item name="colorPrimaryContainer">@color/m3_primary_container_light</item>
+        <item name="colorOnPrimaryContainer">@color/m3_on_primary_container_light</item>
+        <item name="colorSecondary">@color/m3_secondary_light</item>
+        <item name="colorOnSecondary">@color/m3_on_secondary_light</item>
+        <item name="colorSecondaryContainer">@color/m3_secondary_container_light</item>
+        <item name="colorOnSecondaryContainer">@color/m3_on_secondary_container_light</item>
+        <item name="colorSurface">@color/m3_surface_light</item>
+        <item name="colorOnSurface">@color/m3_on_surface_light</item>
+        <item name="colorSurfaceVariant">@color/m3_surface_variant_light</item>
+        <item name="colorOnSurfaceVariant">@color/m3_on_surface_variant_light</item>
+        <item name="colorSurfaceContainerLowest">@color/m3_surface_container_lowest_light</item>
+        <item name="colorSurfaceContainerLow">@color/m3_surface_container_low_light</item>
+        <item name="colorSurfaceContainer">@color/m3_surface_container_light</item>
+        <item name="colorSurfaceContainerHigh">@color/m3_surface_container_high_light</item>
+        <item name="colorSurfaceContainerHighest">@color/m3_surface_container_highest_light</item>
+        <item name="colorOutline">@color/m3_outline_light</item>
+        <item name="colorOutlineVariant">@color/m3_outline_variant_light</item>
         <item name="android:divider">@color/separatorLight</item>
         <item name="android:queryBackground">@color/bubbleLight</item>
-        <item name="android:statusBarColor">@color/black</item>
-        <item name="android:textColorPrimary">@color/text_primary</item>
-        <item name="android:textColorSecondary">@color/text_secondary</item>
-        <item name="android:textColorTertiary">@color/text_tertiary</item>
+        <item name="android:statusBarColor">@color/backgroundLight</item>
+        <item name="android:textColorPrimary">@color/textPrimary</item>
+        <item name="android:textColorSecondary">@color/textSecondary</item>
+        <item name="android:textColorTertiary">@color/textTertiary</item>
         <item name="android:windowBackground">@color/backgroundLight</item>
         <item name="android:windowContentTransitions">true</item>
         <item name="actionBarPopupTheme">@style/PopupTheme</item>
         <item name="bubbleColor">@color/bubbleLight</item>
-        <item name="colorPrimary">@color/backgroundLight</item>
-        <item name="colorPrimaryDark">@color/backgroundLight</item>
         <item name="selectableItemBackground">@drawable/ripple</item>
         <item name="switchThumbEnabled">@color/switchThumbEnabledLight</item>
         <item name="switchThumbDisabled">@color/switchThumbDisabledLight</item>
@@ -59,40 +76,36 @@
         <item name="glassBackground">@color/glassLight</item>
         <item name="glassComposerBackground">@color/glassComposerLight</item>
         <item name="pillSearchBackground">@color/pillSearchLight</item>
-        <item name="colorSurface">@color/surfaceLight</item>
-        <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorOutline">@color/cardBorderLight</item>
-        <item name="colorSecondary">@color/text_secondary</item>
         <item name="windowActionBar">false</item>
     </style>
 
-    <style name="AppThemeDialog" parent="Theme.MaterialComponents.Light.Dialog">
-        <item name="android:textColorPrimary">@color/text_primary</item>
-        <item name="android:textColorSecondary">@color/text_secondary</item>
-        <item name="android:textColorTertiary">@color/text_tertiary</item>
+    <style name="AppThemeDialog" parent="Theme.Material3.Light.Dialog">
+        <item name="colorPrimary">@color/m3_primary_light</item>
+        <item name="colorOnPrimary">@color/m3_on_primary_light</item>
+        <item name="colorSurface">@color/surfaceLight</item>
+        <item name="colorOnSurface">@color/textPrimary</item>
+        <item name="colorOutline">@color/cardBorderLight</item>
+        <item name="android:textColorPrimary">@color/textPrimary</item>
+        <item name="android:textColorSecondary">@color/textSecondary</item>
+        <item name="android:textColorTertiary">@color/textTertiary</item>
         <item name="android:windowBackground">@color/backgroundLight</item>
         <item name="actionBarPopupTheme">@style/PopupTheme</item>
         <item name="bubbleColor">@color/bubbleLight</item>
-        <item name="colorPrimary">@color/backgroundLight</item>
-        <item name="colorPrimaryDark">@color/backgroundLight</item>
         <item name="selectableItemBackground">@drawable/ripple</item>
         <item name="cardBackground">@color/surfaceLight</item>
         <item name="cardBorder">@color/cardBorderLight</item>
         <item name="glassBackground">@color/glassLight</item>
         <item name="glassComposerBackground">@color/glassComposerLight</item>
         <item name="pillSearchBackground">@color/pillSearchLight</item>
-        <item name="colorSurface">@color/surfaceLight</item>
-        <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorOutline">@color/cardBorderLight</item>
         <item name="windowActionBar">false</item>
     </style>
 
-    <style name="PopupTheme" parent="ThemeOverlay.AppCompat.Light">
+    <style name="PopupTheme" parent="ThemeOverlay.Material3.Light">
         <item name="android:colorBackground">@color/backgroundLight</item>
         <item name="android:textColor">@color/textPrimary</item>
     </style>
 
-    <style name="AppTheme.Gallery" parent="Theme.MaterialComponents.NoActionBar">
+    <style name="AppTheme.Gallery" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:background">@color/black</item>
     </style>
 

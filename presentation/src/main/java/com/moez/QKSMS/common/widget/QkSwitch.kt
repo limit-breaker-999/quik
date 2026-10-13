@@ -59,6 +59,11 @@ class QkSwitch @JvmOverloads constructor(
 
         if (!isInEditMode) {
             try {
+                if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                    // Retain native Material 3 switch state list and colors
+                    return
+                }
+
                 val themeColor = colors.theme().theme
                 val onThemeColor = colors.theme().textPrimary
 

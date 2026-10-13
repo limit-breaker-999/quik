@@ -48,6 +48,7 @@ import dev.octoshrimpy.quik.common.util.Colors
 import dev.octoshrimpy.quik.common.util.DateFormatter
 import dev.octoshrimpy.quik.common.util.TextViewStyler
 import dev.octoshrimpy.quik.common.util.extensions.dpToPx
+import dev.octoshrimpy.quik.common.util.extensions.resolveThemeColor
 import dev.octoshrimpy.quik.common.util.extensions.setBackgroundTint
 import dev.octoshrimpy.quik.common.util.extensions.setPadding
 import dev.octoshrimpy.quik.common.util.extensions.setTint
@@ -268,12 +269,24 @@ class MessagesAdapter @Inject constructor(
                 binding.resendIcon.visibility = View.GONE
             }
 
+            val primaryColor = if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                context.resolveThemeColor(R.attr.colorPrimary)
+            } else {
+                theme.theme
+            }
+            val onPrimaryColor = if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                context.resolveThemeColor(R.attr.colorOnPrimary)
+            } else {
+                theme.textPrimary
+            }
             body.apply {
-                highlightColor = theme.theme.withAlpha(0x5d)
+                setTextColor(onPrimaryColor)
+                setBackgroundTint(primaryColor)
+                highlightColor = onPrimaryColor.withAlpha(0x5d)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    textSelectHandle?.setTint(theme.theme.withAlpha(0xad))
-                    textSelectHandleLeft?.setTint(theme.theme.withAlpha(0xad))
-                    textSelectHandleRight?.setTint(theme.theme.withAlpha(0xad))
+                    textSelectHandle?.setTint(onPrimaryColor.withAlpha(0xad))
+                    textSelectHandleLeft?.setTint(onPrimaryColor.withAlpha(0xad))
+                    textSelectHandleRight?.setTint(onPrimaryColor.withAlpha(0xad))
                 }
             }
         } else {
@@ -293,14 +306,22 @@ class MessagesAdapter @Inject constructor(
                 setVisible(!canGroup(message, next), View.INVISIBLE)
             }
 
+            val surfaceContainerHigh = context.resolveThemeColor(R.attr.colorSurfaceContainerHigh)
+            val onSurface = context.resolveThemeColor(R.attr.colorOnSurface)
+            val colorPrimary = if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                context.resolveThemeColor(R.attr.colorPrimary)
+            } else {
+                theme.theme
+            }
+
             body.apply {
-                setTextColor(theme.textPrimary)
-                setBackgroundTint(theme.theme)
-                highlightColor = R.attr.bubbleColor.withAlpha(0x5d)
+                setTextColor(onSurface)
+                setBackgroundTint(surfaceContainerHigh)
+                highlightColor = colorPrimary.withAlpha(0x5d)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    textSelectHandle?.setTint(R.attr.bubbleColor.withAlpha(0x7d))
-                    textSelectHandleLeft?.setTint(R.attr.bubbleColor.withAlpha(0x7d))
-                    textSelectHandleRight?.setTint(R.attr.bubbleColor.withAlpha(0x7d))
+                    textSelectHandle?.setTint(colorPrimary.withAlpha(0x7d))
+                    textSelectHandleLeft?.setTint(colorPrimary.withAlpha(0x7d))
+                    textSelectHandleRight?.setTint(colorPrimary.withAlpha(0x7d))
                 }
             }
         }
@@ -414,6 +435,17 @@ class MessagesAdapter @Inject constructor(
                     isMe = message.isMe()
                 )
             )
+
+            if (emojiOnly) {
+                backgroundTintList = null
+            } else {
+                val bubbleBg = if (message.isMe()) {
+                    if (prefs.dynamicColor.get() && !prefs.black.get()) context.resolveThemeColor(R.attr.colorPrimary) else theme.theme
+                } else {
+                    context.resolveThemeColor(R.attr.colorSurfaceContainerHigh)
+                }
+                setBackgroundTint(bubbleBg)
+            }
         }
 
         // Bind the parts

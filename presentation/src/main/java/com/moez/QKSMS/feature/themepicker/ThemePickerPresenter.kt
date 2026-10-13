@@ -32,7 +32,7 @@ import javax.inject.Inject
 import javax.inject.Named
 
 class ThemePickerPresenter @Inject constructor(
-    prefs: Preferences,
+    private val prefs: Preferences,
     @Named("recipientId") private val recipientId: Long,
     private val billingManager: BillingManager,
     private val colors: Colors,
@@ -53,6 +53,9 @@ class ThemePickerPresenter @Inject constructor(
         view.themeSelected()
                 .autoDisposable(view.scope())
                 .subscribe { color ->
+                    if (recipientId == 0L && prefs.dynamicColor.get()) {
+                        prefs.dynamicColor.set(false)
+                    }
                     theme.set(color)
                     if (recipientId == 0L) {
                         widgetManager.updateTheme()
@@ -79,6 +82,9 @@ class ThemePickerPresenter @Inject constructor(
                     if (!upgraded) {
                         view.showQksmsPlusSnackbar()
                     } else {
+                        if (recipientId == 0L && prefs.dynamicColor.get()) {
+                            prefs.dynamicColor.set(false)
+                        }
                         theme.set(color)
                         if (recipientId == 0L) {
                             widgetManager.updateTheme()

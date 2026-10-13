@@ -69,6 +69,7 @@ import dev.octoshrimpy.quik.common.util.extensions.autoScrollToStart
 import dev.octoshrimpy.quik.common.util.extensions.dpToPx
 import dev.octoshrimpy.quik.common.util.extensions.hideKeyboard
 import dev.octoshrimpy.quik.common.util.extensions.makeToast
+import dev.octoshrimpy.quik.common.util.extensions.resolveThemeColor
 import dev.octoshrimpy.quik.common.util.extensions.scrapViews
 import dev.octoshrimpy.quik.common.util.extensions.setBackgroundTint
 import dev.octoshrimpy.quik.common.util.extensions.setTint
@@ -203,36 +204,47 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
             theme
                 .doOnNext {
-                    binding.loading.setTint(it.theme)
-                    binding.send.setTint(it.theme)
-                    binding.scheduledSend.setTint(it.theme)
+                    val primaryColor = if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                        resolveThemeColor(R.attr.colorPrimary)
+                    } else {
+                        it.theme
+                    }
+                    val onPrimaryColor = if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                        resolveThemeColor(R.attr.colorOnPrimary)
+                    } else {
+                        it.textPrimary
+                    }
+
+                    binding.loading.setTint(primaryColor)
+                    binding.send.setTint(primaryColor)
+                    binding.scheduledSend.setTint(primaryColor)
 
                     // entire attach menu
-                    binding.attach.setBackgroundTint(it.theme); binding.attach.setTint(it.textPrimary)
-                    binding.contact.setBackgroundTint(it.theme); binding.contact.setTint(it.textPrimary)
-                    binding.contactLabel.setBackgroundTint(it.theme); binding.contactLabel.setTint(it.textPrimary)
-                    binding.schedule.setBackgroundTint(it.theme); binding.schedule.setTint(it.textPrimary)
-                    binding.scheduleLabel.setBackgroundTint(it.theme); binding.scheduleLabel.setTint(it.textPrimary)
-                    binding.attachAFileIcon.setBackgroundTint(it.theme); binding.attachAFileIcon.setTint(it.textPrimary)
-                    binding.attachAFileLabel.setBackgroundTint(it.theme); binding.attachAFileLabel.setTint(it.textPrimary)
-                    binding.attachAnAudioMessageIcon.setBackgroundTint(it.theme); binding.attachAnAudioMessageIcon.setTint(it.textPrimary)
-                    binding.attachAnAudioMessageLabel.setBackgroundTint(it.theme); binding.attachAnAudioMessageLabel.setTint(it.textPrimary)
-                    binding.gallery.setBackgroundTint(it.theme); binding.gallery.setTint(it.textPrimary)
-                    binding.galleryLabel.setBackgroundTint(it.theme); binding.galleryLabel.setTint(it.textPrimary)
-                    binding.camera.setBackgroundTint(it.theme); binding.camera.setTint(it.textPrimary)
-                    binding.cameraLabel.setBackgroundTint(it.theme); binding.cameraLabel.setTint(it.textPrimary)
+                    binding.attach.setBackgroundTint(primaryColor); binding.attach.setTint(onPrimaryColor)
+                    binding.contact.setBackgroundTint(primaryColor); binding.contact.setTint(onPrimaryColor)
+                    binding.contactLabel.setBackgroundTint(primaryColor); binding.contactLabel.setTint(onPrimaryColor)
+                    binding.schedule.setBackgroundTint(primaryColor); binding.schedule.setTint(onPrimaryColor)
+                    binding.scheduleLabel.setBackgroundTint(primaryColor); binding.scheduleLabel.setTint(onPrimaryColor)
+                    binding.attachAFileIcon.setBackgroundTint(primaryColor); binding.attachAFileIcon.setTint(onPrimaryColor)
+                    binding.attachAFileLabel.setBackgroundTint(primaryColor); binding.attachAFileLabel.setTint(onPrimaryColor)
+                    binding.attachAnAudioMessageIcon.setBackgroundTint(primaryColor); binding.attachAnAudioMessageIcon.setTint(onPrimaryColor)
+                    binding.attachAnAudioMessageLabel.setBackgroundTint(primaryColor); binding.attachAnAudioMessageLabel.setTint(onPrimaryColor)
+                    binding.gallery.setBackgroundTint(primaryColor); binding.gallery.setTint(onPrimaryColor)
+                    binding.galleryLabel.setBackgroundTint(primaryColor); binding.galleryLabel.setTint(onPrimaryColor)
+                    binding.camera.setBackgroundTint(primaryColor); binding.camera.setTint(onPrimaryColor)
+                    binding.cameraLabel.setBackgroundTint(primaryColor); binding.cameraLabel.setTint(onPrimaryColor)
 
                     // speech to text floating button
-                    binding.speechToTextIconBorder.setBackgroundTint(it.theme)
-                    binding.speechToTextIcon.setBackgroundTint(it.textPrimary)
-                    binding.speechToTextIcon.setTint(it.theme)
+                    binding.speechToTextIconBorder.setBackgroundTint(primaryColor)
+                    binding.speechToTextIcon.setBackgroundTint(onPrimaryColor)
+                    binding.speechToTextIcon.setTint(primaryColor)
 
                     // audio message recording
-                    binding.audioMsgRecord.setColor(it.theme)
-                    binding.audioMsgPlayerPlayPause.setTint(it.theme)
+                    binding.audioMsgRecord.setColor(primaryColor)
+                    binding.audioMsgPlayerPlayPause.setTint(primaryColor)
                     binding.audioMsgPlayerSeekBar.apply {
-                        thumbTintList = ColorStateList.valueOf(it.theme)
-                        progressBackgroundTintList = ColorStateList.valueOf(it.theme)
+                        thumbTintList = ColorStateList.valueOf(primaryColor)
+                        progressBackgroundTintList = ColorStateList.valueOf(primaryColor)
                         progressTintList = ColorStateList.valueOf(it.theme)
                     }
 

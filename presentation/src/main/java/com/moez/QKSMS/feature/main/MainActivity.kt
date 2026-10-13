@@ -144,6 +144,7 @@ class MainActivity : QkThemedActivity(), MainView {
         super.onCreate(savedInstanceState)
         binding = MainActivityBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        supportActionBar?.setDisplayShowTitleEnabled(false)
         viewModel.bindView(this)
         onNewIntentIntent.onNext(intent)
 
@@ -177,31 +178,55 @@ class MainActivity : QkThemedActivity(), MainView {
                 .autoDisposable(scope())
                 .subscribe { theme ->
                     // Set the color for the drawer icons
-                    val states = arrayOf(
+                    if (!prefs.dynamicColor.get() || prefs.black.get()) {
+                        val states = arrayOf(
                             intArrayOf(android.R.attr.state_activated),
-                            intArrayOf(-android.R.attr.state_activated))
-
-                    ColorStateList(states, intArrayOf(theme.theme,
-                        resolveThemeColor(android.R.attr.textColorSecondary)
-                    ))
-                        .let { tintList ->
+                            intArrayOf(-android.R.attr.state_activated)
+                        )
+                        ColorStateList(states, intArrayOf(
+                            theme.theme,
+                            resolveThemeColor(R.attr.colorOnSurfaceVariant)
+                        )).let { tintList ->
                             binding.drawer.inboxIcon.imageTintList = tintList
                             binding.drawer.archivedIcon.imageTintList = tintList
                         }
+                    } else {
+                        binding.drawer.inboxIcon.imageTintList = null
+                        binding.drawer.archivedIcon.imageTintList = null
+                    }
 
                     // Miscellaneous views
-                    listOf(binding.drawer.plusBadge1, binding.drawer.plusBadge2).forEach { badge ->
-                        badge.setBackgroundTint(theme.theme)
-                        badge.setTextColor(theme.textPrimary)
+                    val accentColor = if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                        resolveThemeColor(R.attr.colorPrimary)
+                    } else {
+                        theme.theme
                     }
-                    syncingBinding.syncingProgress.progressTintList = ColorStateList.valueOf(theme.theme)
-                    syncingBinding.syncingProgress.indeterminateTintList = ColorStateList.valueOf(theme.theme)
-                    binding.drawer.plusIcon.setTint(theme.theme)
-                    binding.drawer.rateIcon.setTint(theme.theme)
-                    binding.compose.setBackgroundTint(theme.theme)
+                    val onAccentColor = if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                        resolveThemeColor(R.attr.colorOnPrimary)
+                    } else {
+                        theme.textPrimary
+                    }
+                    listOf(binding.drawer.plusBadge1, binding.drawer.plusBadge2).forEach { badge ->
+                        badge.setBackgroundTint(accentColor)
+                        badge.setTextColor(onAccentColor)
+                    }
+                    syncingBinding.syncingProgress.progressTintList = ColorStateList.valueOf(accentColor)
+                    syncingBinding.syncingProgress.indeterminateTintList = ColorStateList.valueOf(accentColor)
+                    binding.drawer.plusIcon.setTint(accentColor)
+                    binding.drawer.rateIcon.setTint(accentColor)
 
-                    // Set the FAB compose icon color
-                    binding.compose.setTint(theme.textPrimary)
+                    val fabBg = if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                        resolveThemeColor(R.attr.colorPrimaryContainer)
+                    } else {
+                        theme.theme
+                    }
+                    val fabIcon = if (prefs.dynamicColor.get() && !prefs.black.get()) {
+                        resolveThemeColor(R.attr.colorOnPrimaryContainer)
+                    } else {
+                        theme.textPrimary
+                    }
+                    binding.compose.backgroundTintList = ColorStateList.valueOf(fabBg)
+                    binding.compose.imageTintList = ColorStateList.valueOf(fabIcon)
                 }
     }
 
@@ -244,7 +269,7 @@ class MainActivity : QkThemedActivity(), MainView {
         }
 
         binding.toolbarSearch.setVisible((state.page is Inbox && state.page.selected == 0) || state.page is Searching)
-        binding.toolbarTitle.setVisible(true)
+        binding.toolbarTitle.setVisible(selectedConversations > 0 || state.page is Archived)
 
         binding.toolbar.menu.apply {
             findItem(R.id.select_all)?.isVisible =

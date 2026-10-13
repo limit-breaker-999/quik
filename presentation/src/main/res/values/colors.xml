@@ -28,51 +28,110 @@
     <color name="toolbarDark">#1E293B</color>
     <color name="toolbarTranslucent">#88000000</color>
 
+    <!-- Material 3 Baseline Light Color Roles -->
+    <color name="m3_primary_light">#6750A4</color>
+    <color name="m3_on_primary_light">#FFFFFF</color>
+    <color name="m3_primary_container_light">#EADDFF</color>
+    <color name="m3_on_primary_container_light">#21005D</color>
+    <color name="m3_secondary_light">#625B71</color>
+    <color name="m3_on_secondary_light">#FFFFFF</color>
+    <color name="m3_secondary_container_light">#E8DEF8</color>
+    <color name="m3_on_secondary_container_light">#1D192B</color>
+    <color name="m3_surface_light">#FEF7FF</color>
+    <color name="m3_on_surface_light">#1D1B20</color>
+    <color name="m3_surface_variant_light">#E7E0EC</color>
+    <color name="m3_on_surface_variant_light">#49454F</color>
+    <color name="m3_surface_container_lowest_light">#FFFFFF</color>
+    <color name="m3_surface_container_low_light">#F7F2FA</color>
+    <color name="m3_surface_container_light">#F3EDF7</color>
+    <color name="m3_surface_container_high_light">#ECE6F0</color>
+    <color name="m3_surface_container_highest_light">#E6E0E9</color>
+    <color name="m3_outline_light">#79747E</color>
+    <color name="m3_outline_variant_light">#CAC4D0</color>
+
+    <!-- Material 3 Baseline Dark Color Roles -->
+    <color name="m3_primary_dark">#D0BCFF</color>
+    <color name="m3_on_primary_dark">#381E72</color>
+    <color name="m3_primary_container_dark">#4F378B</color>
+    <color name="m3_on_primary_container_dark">#EADDFF</color>
+    <color name="m3_secondary_dark">#CCC2DC</color>
+    <color name="m3_on_secondary_dark">#332D41</color>
+    <color name="m3_secondary_container_dark">#4A4458</color>
+    <color name="m3_on_secondary_container_dark">#E8DEF8</color>
+    <color name="m3_surface_dark">#141218</color>
+    <color name="m3_on_surface_dark">#E6E0E9</color>
+    <color name="m3_surface_variant_dark">#49454F</color>
+    <color name="m3_on_surface_variant_dark">#CAC4D0</color>
+    <color name="m3_surface_container_lowest_dark">#0F0D13</color>
+    <color name="m3_surface_container_low_dark">#1D1B20</color>
+    <color name="m3_surface_container_dark">#211F26</color>
+    <color name="m3_surface_container_high_dark">#2B2930</color>
+    <color name="m3_surface_container_highest_dark">#36343B</color>
+    <color name="m3_outline_dark">#938F99</color>
+    <color name="m3_outline_variant_dark">#49454F</color>
+
+    <!-- Material 3 AMOLED Black Color Roles -->
+    <color name="m3_secondary_container_black">#383442</color>
+    <color name="m3_on_secondary_container_black">#E8DEF8</color>
+    <color name="m3_on_surface_black">#FFFFFF</color>
+    <color name="m3_on_surface_variant_black">#B3B0B8</color>
+
+    <!-- Curated M3 Harmonized Seed Palettes -->
+    <color name="m3_seed_violet">#6750A4</color>
+    <color name="m3_seed_ocean_cobalt">#00639B</color>
+    <color name="m3_seed_emerald_forest">#006C4C</color>
+    <color name="m3_seed_amber_sunset">#8A5100</color>
+    <color name="m3_seed_crimson_ruby">#B3261E</color>
+    <color name="m3_seed_orchid_plum">#7D5260</color>
+    <color name="m3_seed_slate_indigo">#4355B9</color>
+    <color name="m3_seed_nordic_sage">#3A693C</color>
+
     <!-- Modern Base Backgrounds -->
-    <color name="backgroundLight">#F8FAFC</color>
-    <color name="backgroundDark">#0B0F19</color>
+    <color name="backgroundLight">#FEF7FF</color>
+    <color name="backgroundDark">#141218</color>
 
     <!-- Modern Surface & Card Tokens -->
-    <color name="surfaceLight">#FFFFFF</color>
-    <color name="surfaceDark">#1E293B</color>
+    <color name="surfaceLight">#F7F2FA</color>
+    <color name="surfaceDark">#1D1B20</color>
     <color name="surfaceBlack">#121214</color>
-    <color name="cardBorderLight">#E2E8F0</color>
-    <color name="cardBorderDark">#334155</color>
-    <color name="cardBorderBlack">#27272A</color>
+    <color name="cardBorderLight">#CAC4D0</color>
+    <color name="cardBorderDark">#49454F</color>
+    <color name="cardBorderBlack">#2B2930</color>
 
     <!-- Translucent Glass Overlays -->
-    <color name="glassLight">#E6F8FAFC</color>
-    <color name="glassDark">#E60B0F19</color>
+    <color name="glassLight">#E6FEF7FF</color>
+    <color name="glassDark">#E6141218</color>
     <color name="glassBlack">#E6000000</color>
-    <color name="glassComposerLight">#F2FFFFFF</color>
-    <color name="glassComposerDark">#F21E293B</color>
+    <color name="glassComposerLight">#F2FEF7FF</color>
+    <color name="glassComposerDark">#F21D1B20</color>
     <color name="glassComposerBlack">#F2121214</color>
 
     <!-- Pill Search Bar -->
-    <color name="pillSearchLight">#F1F5F9</color>
-    <color name="pillSearchDark">#1E293B</color>
-    <color name="pillSearchBlack">#18181B</color>
+    <color name="pillSearchLight">#ECE6F0</color>
+    <color name="pillSearchDark">#2B2930</color>
+    <color name="pillSearchBlack">#1C1B1F</color>
 
     <!-- Modern Typography Colors (WCAG AAA/AA) -->
-    <color name="textPrimary">#0F172A</color>
-    <color name="textPrimaryDisabled">#4C0F172A</color>
-    <color name="textSecondary">#475569</color>
-    <color name="textSecondaryDisabled">#4C475569</color>
-    <color name="textTertiary">#94A3B8</color>
+    <color name="textPrimary">#1D1B20</color>
+    <color name="textPrimaryDisabled">#4C1D1B20</color>
+    <color name="textSecondary">#49454F</color>
+    <color name="textSecondaryDisabled">#4C49454F</color>
+    <color name="textTertiary">#79747E</color>
 
-    <color name="textPrimaryDark">#FFFFFFFF</color>
-    <color name="textPrimaryDisabledDark">#7FFFFFFF</color>
-    <color name="textSecondaryDark">#CBD5E1</color>
-    <color name="textSecondaryDisabledDark">#67CBD5E1</color>
-    <color name="textTertiaryDark">#94A3B8</color>
+    <color name="textPrimaryDark">#E6E0E9</color>
+    <color name="textPrimaryDisabledDark">#7FE6E0E9</color>
+    <color name="textSecondaryDark">#CAC4D0</color>
+    <color name="textSecondaryDisabledDark">#67CAC4D0</color>
+    <color name="textTertiaryDark">#938F99</color>
 
     <!-- Modern Bubbles -->
-    <color name="bubbleLight">#F1F5F9</color>
-    <color name="bubbleDark">#1E293B</color>
-    <color name="bubbleBlack">#16161A</color>
+    <color name="bubbleLight">#ECE6F0</color>
+    <color name="bubbleDark">#2B2930</color>
+    <color name="bubbleBlack">#1E1E22</color>
 
-    <color name="separatorLight">#0C000000</color>
-    <color name="separatorDark">#1AFFFFFF</color>
+    <color name="separatorLight">#CAC4D0</color>
+    <color name="separatorDark">#49454F</color>
+    <color name="separatorBlack">#232127</color>
 
     <color name="switchThumbEnabledLight">#ECECEC</color>
     <color name="switchThumbEnabledDark">#B9B9B9</color>
@@ -97,6 +156,110 @@
         <item>#FF6969</item>
         <item>#5D99FF</item>
         <item>#8899EC</item>
+    </array>
+
+    <array name="m3_palette_violet">
+        <item>#F2EDFD</item>
+        <item>#E9DDFF</item>
+        <item>#D0BCFF</item>
+        <item>#B69DF8</item>
+        <item>#9A82DB</item>
+        <item>#6750A4</item>
+        <item>#4F378B</item>
+        <item>#381E72</item>
+        <item>#2B1659</item>
+        <item>#21005D</item>
+    </array>
+
+    <array name="m3_palette_ocean_cobalt">
+        <item>#EDF5FD</item>
+        <item>#D1E4FF</item>
+        <item>#9ECAFF</item>
+        <item>#68B0F7</item>
+        <item>#3896DC</item>
+        <item>#00639B</item>
+        <item>#004C78</item>
+        <item>#003353</item>
+        <item>#00233B</item>
+        <item>#001D36</item>
+    </array>
+
+    <array name="m3_palette_emerald_forest">
+        <item>#E7F8F0</item>
+        <item>#BCF1D8</item>
+        <item>#87D7B3</item>
+        <item>#57BE90</item>
+        <item>#2CA470</item>
+        <item>#006C4C</item>
+        <item>#005238</item>
+        <item>#003926</item>
+        <item>#00281B</item>
+        <item>#002116</item>
+    </array>
+
+    <array name="m3_palette_amber_sunset">
+        <item>#FFF0DF</item>
+        <item>#FFDDB2</item>
+        <item>#FFB959</item>
+        <item>#F59E0B</item>
+        <item>#B46B00</item>
+        <item>#8A5100</item>
+        <item>#693C00</item>
+        <item>#4A2800</item>
+        <item>#341B00</item>
+        <item>#281400</item>
+    </array>
+
+    <array name="m3_palette_crimson_ruby">
+        <item>#FFEDEA</item>
+        <item>#FFDAD6</item>
+        <item>#FFB4AB</item>
+        <item>#FF897D</item>
+        <item>#DE3730</item>
+        <item>#B3261E</item>
+        <item>#8C1D18</item>
+        <item>#601410</item>
+        <item>#410E0B</item>
+        <item>#2C0806</item>
+    </array>
+
+    <array name="m3_palette_orchid_plum">
+        <item>#FCEEED</item>
+        <item>#FFD8E4</item>
+        <item>#F2B7C8</item>
+        <item>#D892A5</item>
+        <item>#A46376</item>
+        <item>#7D5260</item>
+        <item>#633B48</item>
+        <item>#4A2532</item>
+        <item>#381724</item>
+        <item>#2B0B19</item>
+    </array>
+
+    <array name="m3_palette_slate_indigo">
+        <item>#EEF0FF</item>
+        <item>#DCE1FF</item>
+        <item>#B8C4FF</item>
+        <item>#96A6F5</item>
+        <item>#677AE0</item>
+        <item>#4355B9</item>
+        <item>#334094</item>
+        <item>#212970</item>
+        <item>#151A50</item>
+        <item>#0B1038</item>
+    </array>
+
+    <array name="m3_palette_nordic_sage">
+        <item>#E8F5E9</item>
+        <item>#C8E6C9</item>
+        <item>#A5D6A7</item>
+        <item>#81C784</item>
+        <item>#4CAF50</item>
+        <item>#3A693C</item>
+        <item>#2E5330</item>
+        <item>#223D23</item>
+        <item>#162917</item>
+        <item>#0B170B</item>
     </array>
 
     <array name="material_red">
