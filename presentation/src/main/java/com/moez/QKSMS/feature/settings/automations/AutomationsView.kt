@@ -7,8 +7,10 @@ interface AutomationsView : QkViewContract<AutomationsState> {
     fun addRuleClicks(): Observable<*>
     fun editRuleClicks(): Observable<Long>
     fun deleteRuleClicks(): Observable<Long>
+    fun deleteRuleConfirmed(): Observable<Long>
     fun toggleRuleClicks(): Observable<Long>
 
+    fun confirmDelete(ruleId: Long)
     fun showEditRule(ruleId: Long)
 }
 

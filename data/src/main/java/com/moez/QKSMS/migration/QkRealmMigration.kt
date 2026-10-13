@@ -37,7 +37,7 @@ class QkRealmMigration @Inject constructor(
 ) : RealmMigration {
 
     companion object {
-        const val SCHEMA_VERSION: Long = 16
+        const val SCHEMA_VERSION: Long = 17
     }
 
     @SuppressLint("ApplySharedPref")
@@ -321,6 +321,14 @@ class QkRealmMigration @Inject constructor(
                 .addField("delayMs", Long::class.java, FieldAttribute.REQUIRED)
                 .addField("createdAt", Long::class.java, FieldAttribute.REQUIRED)
                 .addField("hitCount", Long::class.java, FieldAttribute.REQUIRED)
+
+            version++
+        }
+
+        if (version == 16L) {
+            realm.schema.create("AutomationReplyState")
+                .addField("id", String::class.java, FieldAttribute.PRIMARY_KEY, FieldAttribute.REQUIRED)
+                .addField("lastReplyAt", Long::class.java, FieldAttribute.REQUIRED)
 
             version++
         }

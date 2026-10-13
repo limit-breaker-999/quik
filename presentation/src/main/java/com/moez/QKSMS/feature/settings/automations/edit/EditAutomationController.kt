@@ -12,6 +12,8 @@ import com.jakewharton.rxbinding2.widget.checkedChanges
 import com.jakewharton.rxbinding2.widget.textChanges
 import dev.octoshrimpy.quik.R
 import dev.octoshrimpy.quik.common.base.QkController
+import dev.octoshrimpy.quik.common.util.Colors
+import dev.octoshrimpy.quik.common.util.extensions.resolveThemeColor
 import dev.octoshrimpy.quik.databinding.EditAutomationControllerBinding
 import dev.octoshrimpy.quik.injection.appComponent
 import dev.octoshrimpy.quik.model.AutomationRule
@@ -31,6 +33,7 @@ class EditAutomationController(private val ruleId: Long = -1L)
     }
 
     @Inject override lateinit var presenter: EditAutomationPresenter
+    @Inject lateinit var colors: Colors
 
     private val actionSubject: Subject<String> = PublishSubject.create()
     private val delaySubject: Subject<Long> = PublishSubject.create()
@@ -38,6 +41,9 @@ class EditAutomationController(private val ruleId: Long = -1L)
     init {
         appComponent.inject(this)
         retainViewMode = RetainViewMode.RETAIN_DETACH
+        // Persist the rule id so Conductor's Bundle constructor can restore it
+        // after process death / view restoration (BUG-057)
+        args.putLong(KEY_RULE_ID, ruleId)
     }
 
     override fun inflateBinding(inflater: LayoutInflater, container: ViewGroup): EditAutomationControllerBinding =
@@ -110,13 +116,33 @@ class EditAutomationController(private val ruleId: Long = -1L)
         binding.appendSenderSwitch.isChecked = state.appendSenderToForward
         if (binding.replyTemplateField.text.toString() != state.replyTemplate) binding.replyTemplateField.setText(state.replyTemplate)
 
+        // Visually mark the selected delay chip so the choice is visible:
+        // borderless buttons have no activated-state drawable, so tint the
+        // selected chip with the theme color (BUG-019)
+        val selectedChip = when (state.delayMs) {
+            0L -> binding.delayNone
+            30_000L -> binding.delay30s
+            60_000L -> binding.delay1m
+            300_000L -> binding.delay5m
+            3_600_000L -> binding.delay1h
+            else -> null
+        }
+        val accent = colors.theme().theme
+        listOf(binding.delayNone, binding.delay30s, binding.delay1m, binding.delay5m, binding.delay1h)
+            .forEach { chip ->
+                chip.isActivated = (chip == selectedChip)
+                chip.setTextColor(if (chip == selectedChip) accent
+                    else chip.context.resolveThemeColor(android.R.attr.textColorSecondary))
+            }
+
+        val ctx = binding.root.context
         binding.delaySummary.text = when (state.delayMs) {
-            0L -> "Selected: None (immediate)"
-            30_000L -> "Selected: 30 seconds"
-            60_000L -> "Selected: 1 minute"
-            300_000L -> "Selected: 5 minutes"
-            3_600_000L -> "Selected: 1 hour"
-            else -> "Selected: ${state.delayMs / 1000}s"
+            0L -> ctx.getString(R.string.automation_delay_selected_none)
+            30_000L -> ctx.getString(R.string.automation_delay_selected_30s)
+            60_000L -> ctx.getString(R.string.automation_delay_selected_1m)
+            300_000L -> ctx.getString(R.string.automation_delay_selected_5m)
+            3_600_000L -> ctx.getString(R.string.automation_delay_selected_1h)
+            else -> ctx.getString(R.string.automation_delay_selected_custom, state.delayMs / 1000)
         }
     }
 
@@ -124,32 +150,56 @@ class EditAutomationController(private val ruleId: Long = -1L)
         router.popCurrentController()
     }
 
-    override fun nameChanges(): Observable<String> = binding.ruleName.textChanges().map { it.toString() }
-    override fun matchSenderChanges(): Observable<String> = binding.matchSenderField.textChanges().map { it.toString() }
-    override fun matchSenderRegexToggle(): Observable<Boolean> = binding.senderRegexSwitch.checkedChanges()
-    override fun matchSenderCaseSensitiveToggle(): Observable<Boolean> = binding.senderCaseSwitch.checkedChanges()
-    override fun matchBodyChanges(): Observable<String> = binding.matchBodyField.textChanges().map { it.toString() }
-    override fun matchBodyRegexToggle(): Observable<Boolean> = binding.bodyRegexSwitch.checkedChanges()
-    override fun matchBodyCaseSensitiveToggle(): Observable<Boolean> = binding.bodyCaseSwitch.checkedChanges()
-    override fun skipContactsToggle(): Observable<Boolean> = binding.skipContactsSwitch.checkedChanges()
+    // textChanges()/checkedChanges() are InitialValueObservables: they emit the
+    // view's current (empty/default) value on subscribe. Without skipInitialValue
+    // those 14 immediate emissions blank the loaded-rule state right after
+    // setRuleId() (BUG-058).
+    override fun nameChanges(): Observable<String> = binding.ruleName.textChanges().skipInitialValue().map { it.toString() }
+    override fun matchSenderChanges(): Observable<String> = binding.matchSenderField.textChanges().skipInitialValue().map { it.toString() }
+    override fun matchSenderRegexToggle(): Observable<Boolean> = binding.senderRegexSwitch.checkedChanges().skipInitialValue()
+    override fun matchSenderCaseSensitiveToggle(): Observable<Boolean> = binding.senderCaseSwitch.checkedChanges().skipInitialValue()
+    override fun matchBodyChanges(): Observable<String> = binding.matchBodyField.textChanges().skipInitialValue().map { it.toString() }
+    override fun matchBodyRegexToggle(): Observable<Boolean> = binding.bodyRegexSwitch.checkedChanges().skipInitialValue()
+    override fun matchBodyCaseSensitiveToggle(): Observable<Boolean> = binding.bodyCaseSwitch.checkedChanges().skipInitialValue()
+    override fun skipContactsToggle(): Observable<Boolean> = binding.skipContactsSwitch.checkedChanges().skipInitialValue()
     override fun actionSelected(): Observable<String> = actionSubject
-    override fun forwardPhoneChanges(): Observable<String> = binding.forwardPhoneField.textChanges().map { it.toString() }
-    override fun forwardUrlChanges(): Observable<String> = binding.forwardUrlField.textChanges().map { it.toString() }
-    override fun appendSenderToggle(): Observable<Boolean> = binding.appendSenderSwitch.checkedChanges()
-    override fun replyTemplateChanges(): Observable<String> = binding.replyTemplateField.textChanges().map { it.toString() }
+    override fun forwardPhoneChanges(): Observable<String> = binding.forwardPhoneField.textChanges().skipInitialValue().map { it.toString() }
+    override fun forwardUrlChanges(): Observable<String> = binding.forwardUrlField.textChanges().skipInitialValue().map { it.toString() }
+    override fun appendSenderToggle(): Observable<Boolean> = binding.appendSenderSwitch.checkedChanges().skipInitialValue()
+    override fun replyTemplateChanges(): Observable<String> = binding.replyTemplateField.textChanges().skipInitialValue().map { it.toString() }
     override fun delaySelected(): Observable<Long> = delaySubject
     override fun saveClicks(): Observable<*> = binding.saveButton.clicks()
     override fun presetClicks(): Observable<*> = binding.presetsButton.clicks()
 
     override fun showPresets(presets: List<Pair<String, String>>) {
+        // activity is null when the controller is detached (rotation/navigation
+        // race) — guard instead of force-unwrapping (BUG-082)
+        val act = activity ?: return
         val labels = presets.map { it.first }.toTypedArray()
-        AlertDialog.Builder(activity!!)
+        AlertDialog.Builder(act)
             .setTitle(R.string.automation_presets_title)
             .setItems(labels) { _, index ->
                 binding.matchBodyField.setText(presets[index].second)
                 binding.bodyRegexSwitch.isChecked = true
             }
             .setNegativeButton(R.string.button_cancel, null)
+            .show()
+    }
+
+    override fun showValidationError(error: String) {
+        val act = activity ?: return
+        val message = when (error) {
+            EditAutomationPresenter.VALIDATION_URL ->
+                act.getString(R.string.automation_validation_url)
+            EditAutomationPresenter.VALIDATION_PHONE ->
+                act.getString(R.string.automation_validation_phone)
+            EditAutomationPresenter.VALIDATION_TEMPLATE ->
+                act.getString(R.string.automation_validation_template)
+            else -> return
+        }
+        AlertDialog.Builder(act)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, null)
             .show()
     }
 }

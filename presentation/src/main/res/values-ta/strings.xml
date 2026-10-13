@@ -91,7 +91,6 @@
     <string name="compose_title_selected">%d தேர்ந்தெடுக்கப்பட்டது</string>
     <string name="compose_subtitle_results">%2$d-ல் %1$d ஆம் முடிவு</string>
     <string name="compose_send_group_title">குழு தகவலாக அனுப்பு</string>
-    <string name="compose_send_group_summary">பெறுநர்கள் மற்றும் பதில்கள் அனைவருக்கும் தெரியும்</string>
     <string name="compose_messages_empty">இது உங்கள் உரையாடலின் ஆரம்பம். ஏதாவது நல்லதைச் சொல்லுங்கள்!</string>
     <string name="compose_vcard_label">தொடர்பு அட்டை</string>
     <string name="compose_scheduled_for">குறித்த நேரம்</string>
@@ -181,11 +180,6 @@
     <string name="scheduled_empty_message_3_timestamp">டிசம்பர் 23 அன்று அனுப்புகிறது</string>
     <string name="scheduled_compose_cd">செய்தியைத் திட்டமிடு</string>
     <string name="scheduled_options_title">திட்டமிடப்பட்ட செய்தி</string>
-    <string-array name="scheduled_options">
-        <item>இப்போது அனுப்பு</item>
-        <item>உரையை நகலெடு</item>
-        <item>நீக்கு</item>
-    </string-array>
     <string name="settings_category_appearance">தோற்றம்</string>
     <string name="settings_category_general">பொது</string>
     <string name="settings_category_qkreply">QK பதில்</string>

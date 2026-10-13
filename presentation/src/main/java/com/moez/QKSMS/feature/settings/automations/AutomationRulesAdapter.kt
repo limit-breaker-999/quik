@@ -1,7 +1,9 @@
 package dev.octoshrimpy.quik.feature.settings.automations
 
 import android.view.LayoutInflater
+import androidx.recyclerview.widget.RecyclerView
 import android.view.ViewGroup
+import dev.octoshrimpy.quik.R
 import dev.octoshrimpy.quik.common.base.QkBindingViewHolder
 import dev.octoshrimpy.quik.common.base.QkRealmAdapter
 import dev.octoshrimpy.quik.databinding.AutomationRuleListItemBinding
@@ -19,11 +21,17 @@ class AutomationRulesAdapter : QkRealmAdapter<AutomationRule, QkBindingViewHolde
         val binding = AutomationRuleListItemBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         return QkBindingViewHolder(binding).apply {
             binding.root.setOnClickListener {
-                val rule = getItem(adapterPosition) ?: return@setOnClickListener
+                // NO_POSITION guard drops clicks mid-animation safely (BUG-037)
+                // (adapterPosition, not bindingAdapterPosition: recyclerview is 1.1.0)
+                val position = adapterPosition
+                if (position == RecyclerView.NO_POSITION) return@setOnClickListener
+                val rule = getItem(position) ?: return@setOnClickListener
                 editClicks.onNext(rule.id)
             }
             binding.automationRuleDelete.setOnClickListener {
-                val rule = getItem(adapterPosition) ?: return@setOnClickListener
+                val position = adapterPosition
+                if (position == RecyclerView.NO_POSITION) return@setOnClickListener
+                val rule = getItem(position) ?: return@setOnClickListener
                 deleteClicks.onNext(rule.id)
             }
         }
@@ -31,12 +39,16 @@ class AutomationRulesAdapter : QkRealmAdapter<AutomationRule, QkBindingViewHolde
 
     override fun onBindViewHolder(holder: QkBindingViewHolder<AutomationRuleListItemBinding>, position: Int) {
         val rule = getItem(position) ?: return
-        holder.binding.automationRuleName.text = rule.name.ifBlank { "Unnamed rule" }
+        holder.binding.automationRuleName.text = rule.name.ifBlank {
+            holder.binding.root.context.getString(R.string.automation_rule_unnamed)
+        }
         holder.binding.automationRuleSummary.text = buildSummary(rule)
         holder.binding.automationRuleEnabled.setOnCheckedChangeListener(null)
         holder.binding.automationRuleEnabled.isChecked = rule.enabled
         holder.binding.automationRuleEnabled.setOnCheckedChangeListener { _, isChecked ->
-            val r = getItem(holder.adapterPosition) ?: return@setOnCheckedChangeListener
+            val position = holder.adapterPosition
+            if (position == RecyclerView.NO_POSITION) return@setOnCheckedChangeListener
+            val r = getItem(position) ?: return@setOnCheckedChangeListener
             if (r.enabled != isChecked) {
                 toggleClicks.onNext(r.id)
             }

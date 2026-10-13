@@ -91,7 +91,6 @@
     <string name="compose_title_selected">%d vald</string>
     <string name="compose_subtitle_results">%1$d av %2$d resultat</string>
     <string name="compose_send_group_title">Skicka som ett grupp-meddelande</string>
-    <string name="compose_send_group_summary">Mottagare och svar kommer att vara synligt för alla</string>
     <string name="compose_messages_empty">Det här är början på din konversation. Säg något snällt!</string>
     <string name="compose_vcard_label">Kontaktkort</string>
     <string name="compose_scheduled_for">Schemalagd tid:</string>
@@ -181,11 +180,6 @@
     <string name="scheduled_empty_message_3_timestamp">Skickar den 23:e December </string>
     <string name="scheduled_compose_cd">Schemalägg ett meddelande</string>
     <string name="scheduled_options_title">Schemalagt meddelande</string>
-    <string-array name="scheduled_options">
-        <item>Skicka nu</item>
-        <item>Kopiera text</item>
-        <item>Radera</item>
-    </string-array>
     <string name="settings_category_appearance">Utseende</string>
     <string name="settings_category_general">Generellt</string>
     <string name="settings_category_qkreply">QK svar</string>

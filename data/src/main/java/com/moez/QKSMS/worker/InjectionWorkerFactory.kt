@@ -37,6 +37,7 @@ import dev.octoshrimpy.quik.repository.MessageRepository
 import dev.octoshrimpy.quik.repository.ScheduledMessageRepository
 import dev.octoshrimpy.quik.repository.SyncRepository
 import dev.octoshrimpy.quik.util.Preferences
+import timber.log.Timber
 import javax.inject.Inject
 
 class InjectionWorkerFactory @Inject constructor(
@@ -100,6 +101,10 @@ class InjectionWorkerFactory @Inject constructor(
                 instance.contactsRepo = contactRepo
                 instance.executeAutomations = executeAutomations
             }
+            else -> Timber.w(
+                "No dependency injection mapping for worker $workerClassName; " +
+                    "its @Inject fields will be uninitialized"
+            )
         }
 
         return instance

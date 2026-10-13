@@ -91,7 +91,6 @@
     <string name="compose_title_selected">%d valittu</string>
     <string name="compose_subtitle_results">%1$d / %2$d tuloksesta</string>
     <string name="compose_send_group_title">Lähetä ryhmäviestinä</string>
-    <string name="compose_send_group_summary">Vastaanottajat ja vastaukset näkyvät kaikille</string>
     <string name="compose_messages_empty">Tämä on keskustelusi alku. Sano jotain mukavaa!</string>
     <string name="compose_vcard_label">Käyntikortti</string>
     <string name="compose_scheduled_for">Ajoitettu</string>
@@ -181,11 +180,6 @@
     <string name="scheduled_empty_message_3_timestamp">Lähetetään joulukuun 23. päivänä</string>
     <string name="scheduled_compose_cd">Ajoita viesti</string>
     <string name="scheduled_options_title">Ajoitettu viesti</string>
-    <string-array name="scheduled_options">
-        <item>Lähetä nyt</item>
-        <item>Kopioi teksti</item>
-        <item>Poista</item>
-    </string-array>
     <string name="settings_category_appearance">Ulkonäkö</string>
     <string name="settings_category_general">Yleiset</string>
     <string name="settings_category_qkreply">QK-vastaus</string>

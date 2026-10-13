@@ -91,7 +91,6 @@
     <string name="compose_title_selected">%d valgt</string>
     <string name="compose_subtitle_results">%1$d af %2$d resultater</string>
     <string name="compose_send_group_title">Send som gruppe besked</string>
-    <string name="compose_send_group_summary">Modtagere og besvarelser vil være synlige for alle</string>
     <string name="compose_messages_empty">Detter er starten på den samtale. Sig noget pænt!</string>
     <string name="compose_vcard_label">Kontaktkort</string>
     <string name="compose_scheduled_for">Planlagt til</string>
@@ -181,11 +180,6 @@
     <string name="scheduled_empty_message_3_timestamp">Sender d. 23. december </string>
     <string name="scheduled_compose_cd">Planlæg en besked</string>
     <string name="scheduled_options_title">Planlagt besked</string>
-    <string-array name="scheduled_options">
-        <item>Send nu</item>
-        <item>Kopiér tekst</item>
-        <item>Slet</item>
-    </string-array>
     <string name="settings_category_appearance">Udseende</string>
     <string name="settings_category_general">Generelt</string>
     <string name="settings_category_qkreply">QK-svar</string>

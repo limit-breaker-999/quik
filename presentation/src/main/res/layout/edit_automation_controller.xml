@@ -71,7 +71,7 @@
                 android:text="@string/automation_is_regex"
                 android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
 
-            <androidx.appcompat.widget.SwitchCompat
+            <dev.octoshrimpy.quik.common.widget.QkSwitch
                 android:id="@+id/senderRegexSwitch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -84,7 +84,7 @@
                 android:text="@string/automation_case_sensitive"
                 android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
 
-            <androidx.appcompat.widget.SwitchCompat
+            <dev.octoshrimpy.quik.common.widget.QkSwitch
                 android:id="@+id/senderCaseSwitch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
@@ -124,7 +124,7 @@
                 android:text="@string/automation_is_regex"
                 android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
 
-            <androidx.appcompat.widget.SwitchCompat
+            <dev.octoshrimpy.quik.common.widget.QkSwitch
                 android:id="@+id/bodyRegexSwitch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -137,7 +137,7 @@
                 android:text="@string/automation_case_sensitive"
                 android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
 
-            <androidx.appcompat.widget.SwitchCompat
+            <dev.octoshrimpy.quik.common.widget.QkSwitch
                 android:id="@+id/bodyCaseSwitch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
@@ -169,7 +169,7 @@
                 android:textAppearance="@style/TextAppearance.AppCompat.Body1"
                 android:textColor="?android:attr/textColorPrimary" />
 
-            <androidx.appcompat.widget.SwitchCompat
+            <dev.octoshrimpy.quik.common.widget.QkSwitch
                 android:id="@+id/skipContactsSwitch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
@@ -194,7 +194,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Choose one action to perform when a message matches:"
+            android:text="@string/automation_action_hint"
             android:textAppearance="@style/TextAppearance.AppCompat.Caption"
             android:textColor="?android:attr/textColorSecondary"
             android:layout_marginBottom="8dp" />
@@ -276,7 +276,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Forward SMS settings"
+                android:text="@string/automation_forward_sms_title"
                 android:textAppearance="@style/TextAppearance.AppCompat.Body1"
                 android:textColor="?android:attr/textColorPrimary"
                 android:layout_marginBottom="8dp" />
@@ -303,7 +303,7 @@
                     android:text="@string/automation_append_sender"
                     android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
 
-                <androidx.appcompat.widget.SwitchCompat
+                <dev.octoshrimpy.quik.common.widget.QkSwitch
                     android:id="@+id/appendSenderSwitch"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content" />
@@ -326,7 +326,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="HTTP webhook settings"
+                android:text="@string/automation_forward_http_title"
                 android:textAppearance="@style/TextAppearance.AppCompat.Body1"
                 android:textColor="?android:attr/textColorPrimary"
                 android:layout_marginBottom="8dp" />
@@ -355,7 +355,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Auto-reply settings"
+                android:text="@string/automation_auto_reply_title"
                 android:textAppearance="@style/TextAppearance.AppCompat.Body1"
                 android:textColor="?android:attr/textColorPrimary"
                 android:layout_marginBottom="8dp" />

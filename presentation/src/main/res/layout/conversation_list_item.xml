@@ -68,6 +68,7 @@
         android:layout_marginTop="3dp"
         android:ellipsize="end"
         android:maxLines="2"
+        app:layout_constrainedWidth="true"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toStartOf="@id/pinned"
         app:layout_constraintStart_toStartOf="@id/title"

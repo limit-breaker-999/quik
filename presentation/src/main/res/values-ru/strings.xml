@@ -93,7 +93,6 @@
     <string name="compose_title_selected">%d выбран(о)</string>
     <string name="compose_subtitle_results">%1$d из %2$d результатов</string>
     <string name="compose_send_group_title">Отправить как групповое сообщение</string>
-    <string name="compose_send_group_summary">Получатели и ответы будут видны всем</string>
     <string name="compose_messages_empty">Это начало вашей беседы. Скажите что-нибудь приятное!</string>
     <string name="compose_vcard_label">Карточка контакта</string>
     <string name="compose_scheduled_for">Запланировано на:</string>
@@ -183,11 +182,6 @@
     <string name="scheduled_empty_message_3_timestamp">Отправка 23 декабря </string>
     <string name="scheduled_compose_cd">Запланировать сообщение</string>
     <string name="scheduled_options_title">Запланированное сообщение</string>
-    <string-array name="scheduled_options">
-        <item>Отправить сейчас</item>
-        <item>Копировать текст</item>
-        <item>Удалить</item>
-    </string-array>
     <string name="settings_category_appearance">Внешний вид</string>
     <string name="settings_category_general">Общее</string>
     <string name="settings_category_qkreply">QK-ответ</string>

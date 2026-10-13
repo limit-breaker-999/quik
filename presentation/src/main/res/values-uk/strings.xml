@@ -93,7 +93,6 @@
     <string name="compose_title_selected">Обрано: %d</string>
     <string name="compose_subtitle_results">%1$d із %2$d результатів</string>
     <string name="compose_send_group_title">Надіслати як групове повідомлення</string>
-    <string name="compose_send_group_summary">Отримувачі та відповіді будуть видимі для всіх</string>
     <string name="compose_messages_empty">Це початок вашої бесіди. Скажіть, що-небудь приємне!</string>
     <string name="compose_vcard_label">Картка контакту</string>
     <string name="compose_scheduled_for">Заплановано на</string>
@@ -183,11 +182,6 @@
     <string name="scheduled_empty_message_3_timestamp">Надіслано: 23 грудня </string>
     <string name="scheduled_compose_cd">Запланувати повідомлення</string>
     <string name="scheduled_options_title">Заплановане повідомлення</string>
-    <string-array name="scheduled_options">
-        <item>Надіслати зараз</item>
-        <item>Копіювати текст</item>
-        <item>Видалити</item>
-    </string-array>
     <string name="settings_category_appearance">Зовнішній вигляд</string>
     <string name="settings_category_general">Загальні</string>
     <string name="settings_category_qkreply">Швидка відповідь</string>

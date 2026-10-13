@@ -92,7 +92,6 @@
     <string name="compose_title_selected">Изабрано: %d</string>
     <string name="compose_subtitle_results">%1$d од %2$d резултата</string>
     <string name="compose_send_group_title">Пошаљи као групну поруку</string>
-    <string name="compose_send_group_summary">Примаоци и одговори ће бити свима видљиви</string>
     <string name="compose_messages_empty">Овде почиње ваш разговор. Реци нешто лепо за почетак!</string>
     <string name="compose_vcard_label">Контакт картица</string>
     <string name="compose_scheduled_for">Заказано за</string>
@@ -182,11 +181,6 @@
     <string name="scheduled_empty_message_3_timestamp">Шаље се 23. децембра.</string>
     <string name="scheduled_compose_cd">Закажи слање</string>
     <string name="scheduled_options_title">Заказана порука</string>
-    <string-array name="scheduled_options">
-        <item>Пошаљи одмах</item>
-        <item>Копирај текст</item>
-        <item>Обриши</item>
-    </string-array>
     <string name="settings_category_appearance">Уреди изглед</string>
     <string name="settings_category_general">Опште</string>
     <string name="settings_category_qkreply">Брзи одговор</string>

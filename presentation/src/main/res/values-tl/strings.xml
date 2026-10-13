@@ -91,7 +91,6 @@
     <string name="compose_title_selected">%d napili</string>
     <string name="compose_subtitle_results">%1$d ng %2$d mga resulta</string>
     <string name="compose_send_group_title">Magpadala bilang group message</string>
-    <string name="compose_send_group_summary">Ang mga tatanggap at tugon ay makikita ng lahat</string>
     <string name="compose_messages_empty">Ito ang simula ng iyong pag-uusap. Magsabi ka ng maganda!</string>
     <string name="compose_vcard_label">Contact card</string>
     <string name="compose_scheduled_for">Naka-iskedyul para sa</string>
@@ -181,11 +180,6 @@
     <string name="scheduled_empty_message_3_timestamp">Sending on December 23rd </string>
     <string name="scheduled_compose_cd">Schedule a message</string>
     <string name="scheduled_options_title">Scheduled message</string>
-    <string-array name="scheduled_options">
-        <item>Send now</item>
-        <item>Copy text</item>
-        <item>Delete</item>
-    </string-array>
     <string name="settings_category_appearance">Appearance</string>
     <string name="settings_category_general">General</string>
     <string name="settings_category_qkreply">QK Reply</string>

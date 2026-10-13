@@ -109,8 +109,8 @@ abstract class QkRealmAdapter<T : RealmModel, VH : QkViewHolder> : RealmRecycler
     }
 
     override fun getItem(index: Int): T? {
-        if (index < 0) {
-            Timber.w("Only indexes >= 0 are allowed. Input was: $index")
+        if (index < 0 || index >= itemCount) {
+            Timber.w("Index out of bounds for adapter. Input was: $index")
             return null
         }
 

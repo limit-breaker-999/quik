@@ -158,17 +158,19 @@ class MainActivity : QkThemedActivity(), MainView {
             it.syncingProgress.indeterminateTintList = ColorStateList.valueOf(theme.blockingFirst().theme)
         }
 
+        binding.drawerLayout.addDrawerListener(toggle)
         toggle.syncState()
         binding.toolbar.setNavigationOnClickListener {
             dismissKeyboard()
-            homeIntent.onNext(Unit)
+            when {
+                binding.drawerLayout.isDrawerOpen(GravityCompat.START) -> binding.drawerLayout.closeDrawer(GravityCompat.START)
+                toggle.isDrawerIndicatorEnabled -> binding.drawerLayout.openDrawer(GravityCompat.START)
+                else -> homeIntent.onNext(Unit)
+            }
         }
 
         itemTouchCallback.adapter = conversationsAdapter
         conversationsAdapter.autoScrollToStart(binding.recyclerView)
-
-        // Don't allow clicks to pass through the drawer layout
-        binding.drawer.root.clicks().autoDisposable(scope()).subscribe()
 
         // Set the theme color tint to the recyclerView, progressbar, and FAB
         theme
@@ -320,7 +322,7 @@ class MainActivity : QkThemedActivity(), MainView {
 
         if (binding.drawerLayout.isDrawerOpen(GravityCompat.START) && !state.drawerOpen)
             binding.drawerLayout.closeDrawer(GravityCompat.START)
-        else if (!binding.drawerLayout.isDrawerVisible(GravityCompat.START) && state.drawerOpen)
+        else if (!binding.drawerLayout.isDrawerOpen(GravityCompat.START) && !binding.drawerLayout.isDrawerVisible(GravityCompat.START) && state.drawerOpen)
             binding.drawerLayout.openDrawer(GravityCompat.START)
 
         when (state.syncing) {
@@ -392,6 +394,7 @@ class MainActivity : QkThemedActivity(), MainView {
 
     override fun showBackButton(show: Boolean) =
         toggle.let {
+            it.isDrawerIndicatorEnabled = !show
             it.onDrawerSlide(binding.drawer.root, if (show) 1f else 0f)
             it.drawerArrowDrawable.color = when (show) {
                 true -> resolveThemeColor(android.R.attr.textColorSecondary)
@@ -489,7 +492,6 @@ class MainActivity : QkThemedActivity(), MainView {
             dismissKeyboard()
             if (!binding.drawer.inbox.isInTouchMode)
                 binding.drawer.inbox.requestFocus()
-        } else
-            binding.toolbarSearch.requestFocus()
+        }
     }
 }

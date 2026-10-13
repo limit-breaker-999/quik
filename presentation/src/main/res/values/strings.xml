@@ -374,10 +374,25 @@
     <string name="automation_delay_1m">1 min</string>
     <string name="automation_delay_5m">5 min</string>
     <string name="automation_delay_1h">1 hour</string>
+    <string name="automation_delay_selected_none">Selected: None (immediate)</string>
+    <string name="automation_delay_selected_30s">Selected: 30 seconds</string>
+    <string name="automation_delay_selected_1m">Selected: 1 minute</string>
+    <string name="automation_delay_selected_5m">Selected: 5 minutes</string>
+    <string name="automation_delay_selected_1h">Selected: 1 hour</string>
+    <string name="automation_delay_selected_custom">Selected: %1$d s</string>
     <string name="automation_save">Save rule</string>
+    <string name="automation_rule_unnamed">Unnamed rule</string>
+    <string name="automation_action_hint">Choose one action to perform when a message matches:</string>
+    <string name="automation_forward_sms_title">Forward SMS settings</string>
+    <string name="automation_forward_http_title">HTTP webhook settings</string>
+    <string name="automation_auto_reply_title">Auto-reply settings</string>
 
+    <string name="automation_validation_url">Webhook URL must start with http:// or https://</string>
+    <string name="automation_validation_phone">Phone number to forward to is required</string>
+    <string name="automation_validation_template">Reply template is required</string>
+    <string name="automation_delete_confirm_title">Delete automation rule?</string>
+    <string name="automation_delete_confirm_message">This rule will be permanently deleted.</string>
     <string name="settings_sync_title">Sync messages</string>
-
     <string name="settings_sync_summary">Re-sync your messages with the native Android SMS database</string>
     <string name="settings_about_title">About QUIK</string>
     <string name="settings_version">Version %s</string>
