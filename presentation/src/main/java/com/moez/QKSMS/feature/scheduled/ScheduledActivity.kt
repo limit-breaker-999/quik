@@ -18,6 +18,7 @@
  */
 package dev.octoshrimpy.quik.feature.scheduled
 
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -75,8 +76,8 @@ class ScheduledActivity : QkThemedActivity(), ScheduledView {
             binding.compose.setTint(theme.textPrimary)
             binding.compose.setBackgroundTint(theme.theme)
             binding.upgrade.setBackgroundTint(theme.theme)
-            binding.upgradeIcon.setTint(theme.textPrimary)
-            binding.upgradeLabel.setTextColor(theme.textPrimary)
+            binding.upgrade.iconTint = ColorStateList.valueOf(theme.textPrimary)
+            binding.upgrade.setTextColor(theme.textPrimary)
         }
     }
 

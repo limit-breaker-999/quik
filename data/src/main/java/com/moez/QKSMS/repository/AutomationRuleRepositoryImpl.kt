@@ -7,7 +7,12 @@ import io.realm.RealmResults
 import timber.log.Timber
 import javax.inject.Inject
 
-class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleRepository {
+class AutomationRuleRepositoryImpl(
+    private val realmProvider: () -> Realm
+) : AutomationRuleRepository {
+
+    @Inject
+    constructor() : this({ Realm.getDefaultInstance() })
 
     private var rulesRealm: Realm? = null
 
@@ -17,7 +22,7 @@ class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleReposit
         } catch (e: Exception) {
             Timber.w(e, "Error closing previous rules Realm instance")
         }
-        val realm = Realm.getDefaultInstance()
+        val realm = realmProvider()
         rulesRealm = realm
         return realm
             .where(AutomationRule::class.java)
@@ -37,7 +42,7 @@ class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleReposit
     override fun getRule(id: Long): AutomationRule? {
         // Return an unmanaged copy: callers mutate the result (e.g. toggling
         // `enabled`) outside a Realm transaction, which throws on managed objects.
-        return Realm.getDefaultInstance().use { realm ->
+        return realmProvider().use { realm ->
             realm.where(AutomationRule::class.java)
                 .equalTo("id", id)
                 .findFirst()
@@ -48,7 +53,7 @@ class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleReposit
     override fun tryAcquireReplySlot(ruleId: Long, threadId: Long, rateLimitMs: Long): Boolean {
         val now = System.currentTimeMillis()
         val key = "$ruleId:$threadId"
-        return Realm.getDefaultInstance().use { realm ->
+        return realmProvider().use { realm ->
             var acquired = false
             realm.executeTransaction { r ->
                 val state = r.where(AutomationReplyState::class.java)
@@ -69,7 +74,7 @@ class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleReposit
     }
 
     override fun saveRule(rule: AutomationRule) {
-        Realm.getDefaultInstance().use { realm ->
+        realmProvider().use { realm ->
             realm.refresh()
             realm.executeTransaction {
                 // ID generation inside the transaction: atomic against
@@ -80,7 +85,38 @@ class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleReposit
                 } else {
                     rule.id
                 }
-                val toSave = realm.copyToRealmOrUpdate(
+                val existing = if (rule.id != 0L) {
+                    realm.where(AutomationRule::class.java).equalTo("id", rule.id).findFirst()
+                } else null
+
+                val actionsJsonToSave = when {
+                    rule.actionsJson.isNotBlank() -> rule.actionsJson
+                    existing?.actionsJson?.isNotBlank() == true -> existing.actionsJson
+                    else -> dev.octoshrimpy.quik.model.AutomationActionStepSerializer.toJson(rule.getActionSteps())
+                }
+
+                val parsedSteps = dev.octoshrimpy.quik.model.AutomationActionStepSerializer.fromJson(actionsJsonToSave)
+                val firstStep = parsedSteps.firstOrNull()
+
+                val actionToSave = firstStep?.action ?: rule.action
+                val forwardPhoneToSave = firstStep?.forwardToPhone ?: rule.forwardToPhone
+                val forwardUrlToSave = firstStep?.forwardToUrl ?: rule.forwardToUrl
+                val appendSenderToSave = firstStep?.appendSenderToForward ?: rule.appendSenderToForward
+                val replyTemplateToSave = firstStep?.replyTemplate ?: rule.replyTemplate
+
+                val createdAtToSave = when {
+                    rule.createdAt != 0L -> rule.createdAt
+                    existing != null && existing.createdAt != 0L -> existing.createdAt
+                    else -> System.currentTimeMillis()
+                }
+
+                val hitCountToSave = when {
+                    rule.hitCount != 0L -> rule.hitCount
+                    existing != null -> existing.hitCount
+                    else -> 0L
+                }
+
+                realm.copyToRealmOrUpdate(
                     AutomationRule(
                         id = id,
                         name = rule.name,
@@ -92,24 +128,24 @@ class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleReposit
                         matchBodyIsRegex = rule.matchBodyIsRegex,
                         matchBodyCaseSensitive = rule.matchBodyCaseSensitive,
                         skipContacts = rule.skipContacts,
-                        action = rule.action,
-                        forwardToPhone = rule.forwardToPhone,
-                        forwardToUrl = rule.forwardToUrl,
-                        appendSenderToForward = rule.appendSenderToForward,
-                        replyTemplate = rule.replyTemplate,
+                        actionsJson = actionsJsonToSave,
+                        action = actionToSave,
+                        forwardToPhone = forwardPhoneToSave,
+                        forwardToUrl = forwardUrlToSave,
+                        appendSenderToForward = appendSenderToSave,
+                        replyTemplate = replyTemplateToSave,
                         replyRateLimitMs = rule.replyRateLimitMs,
                         delayMs = rule.delayMs,
-                        createdAt = rule.createdAt,
-                        hitCount = rule.hitCount
+                        createdAt = createdAtToSave,
+                        hitCount = hitCountToSave
                     )
                 )
-                if (toSave.createdAt == 0L) toSave.createdAt = System.currentTimeMillis()
             }
         }
     }
 
     override fun deleteRule(id: Long) {
-        Realm.getDefaultInstance().use { realm ->
+        realmProvider().use { realm ->
             realm.executeTransaction {
                 realm.where(AutomationRule::class.java)
                     .equalTo("id", id)
@@ -120,7 +156,7 @@ class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleReposit
     }
 
     override fun getEnabledRules(): List<AutomationRule> {
-        return Realm.getDefaultInstance().use { realm ->
+        return realmProvider().use { realm ->
             realm.where(AutomationRule::class.java)
                 .equalTo("enabled", true)
                 .findAll()
@@ -129,7 +165,7 @@ class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleReposit
     }
 
     override fun incrementHitCount(id: Long) {
-        Realm.getDefaultInstance().use { realm ->
+        realmProvider().use { realm ->
             realm.executeTransaction {
                 val rule = realm.where(AutomationRule::class.java).equalTo("id", id).findFirst()
                 rule?.hitCount = (rule?.hitCount ?: 0) + 1

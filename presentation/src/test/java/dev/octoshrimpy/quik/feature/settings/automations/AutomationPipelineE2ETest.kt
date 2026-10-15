@@ -27,20 +27,30 @@ import io.reactivex.subjects.PublishSubject
 import io.realm.RealmResults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.mockito.ArgumentCaptor
+import org.mockito.Mockito
+import java.util.UUID
+import dev.octoshrimpy.quik.worker.AutomationActionWorker
+import dev.octoshrimpy.quik.repository.AutomationRuleRepositoryImpl
 
 class AutomationPipelineE2ETest {
 
     // ── Fake Repositories ───────────────────────────────────────────────
 
-    class FakeAutomationRuleRepo : AutomationRuleRepository {
+    open class FakeAutomationRuleRepo : AutomationRuleRepository {
         val rules = mutableListOf<AutomationRule>()
         val hitCounts = mutableMapOf<Long, Long>()
+        var saveCount: Int = 0
 
-        override fun getRules(): RealmResults<AutomationRule> = throw UnsupportedOperationException()
+        @Suppress("UNCHECKED_CAST")
+        override fun getRules(): RealmResults<AutomationRule> =
+            Mockito.mock(RealmResults::class.java) as RealmResults<AutomationRule>
         override fun getRule(id: Long): AutomationRule? = rules.find { it.id == id }
         override fun saveRule(rule: AutomationRule) {
+            saveCount++
             rules.removeAll { it.id == rule.id && rule.id != 0L }
             rules.add(rule)
         }
@@ -209,6 +219,7 @@ class AutomationPipelineE2ETest {
     @org.junit.Before
     fun setUp() {
         io.reactivex.android.plugins.RxAndroidPlugins.setInitMainThreadSchedulerHandler { io.reactivex.schedulers.Schedulers.trampoline() }
+        io.reactivex.plugins.RxJavaPlugins.setIoSchedulerHandler { io.reactivex.schedulers.Schedulers.trampoline() }
         com.uber.autodispose.android.AutoDisposeAndroidPlugins.setOnCheckMainThread { true }
         androidx.arch.core.executor.ArchTaskExecutor.getInstance().setDelegate(object : androidx.arch.core.executor.TaskExecutor() {
             override fun executeOnDiskIO(runnable: Runnable) = runnable.run()
@@ -221,6 +232,7 @@ class AutomationPipelineE2ETest {
     fun tearDown() {
         androidx.arch.core.executor.ArchTaskExecutor.getInstance().setDelegate(null)
         com.uber.autodispose.android.AutoDisposeAndroidPlugins.reset()
+        io.reactivex.plugins.RxJavaPlugins.reset()
         io.reactivex.android.plugins.RxAndroidPlugins.reset()
     }
 
@@ -543,5 +555,307 @@ class AutomationPipelineE2ETest {
         val msgFromBank = createMessage(2L, 20L, "VK-HDFCBK", "INR 500 debited")
         interactor.execute(msgFromBank)
         assertEquals(1L, autoRepo.hitCounts[20L])
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 6. Preservation of actionsJson in AutomationRuleRepositoryImpl
+    // ────────────────────────────────────────────────────────────────────
+    @Suppress("UNCHECKED_CAST")
+    @Test
+    fun testActionsJsonPreservedOnSaveRuleAndToggleInRepository() {
+        val mockRealm = Mockito.mock(io.realm.Realm::class.java)
+        val captor = ArgumentCaptor.forClass(AutomationRule::class.java)
+        var currentStoredRule: AutomationRule? = null
+
+        Mockito.doAnswer { invocation ->
+            val transaction = invocation.arguments[0] as io.realm.Realm.Transaction
+            transaction.execute(mockRealm)
+            null
+        }.`when`(mockRealm).executeTransaction(Mockito.any())
+
+        val query = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<AutomationRule>
+        Mockito.`when`(mockRealm.where(AutomationRule::class.java)).thenReturn(query)
+        Mockito.`when`(query.equalTo("id", 42L)).thenReturn(query)
+        Mockito.`when`(query.findFirst()).thenAnswer { currentStoredRule }
+
+        Mockito.`when`(mockRealm.copyToRealmOrUpdate(captor.capture())).thenAnswer {
+            val saved = it.arguments[0] as AutomationRule
+            currentStoredRule = saved
+            saved
+        }
+
+        val repo = AutomationRuleRepositoryImpl { mockRealm }
+
+        val initialSteps = listOf(
+            AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+1234567890"),
+            AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+        )
+        val initialJson = AutomationActionStepSerializer.toJson(initialSteps)
+        val rule = AutomationRule(
+            id = 42L,
+            name = "Forward & Delete",
+            enabled = true,
+            actionsJson = initialJson,
+            createdAt = 1600000000000L,
+            hitCount = 42L
+        )
+
+        // 1. Verify actionsJson, createdAt, and hitCount are preserved and written to Realm on saveRule
+        repo.saveRule(rule)
+        val saved1 = captor.value
+        assertEquals("actionsJson must be preserved on saveRule()", initialJson, saved1.actionsJson)
+        assertEquals(1600000000000L, saved1.createdAt)
+        assertEquals(42L, saved1.hitCount)
+
+        // 2. Verify toggle (simulating AutomationsPresenter toggle rule click)
+        Mockito.`when`(mockRealm.copyFromRealm(saved1)).thenReturn(saved1)
+        val retrieved = repo.getRule(42L)
+        assertNotNull(retrieved)
+        assertEquals(initialJson, retrieved!!.actionsJson)
+
+        retrieved.enabled = !retrieved.enabled
+        repo.saveRule(retrieved)
+
+        val saved2 = captor.allValues.last()
+        assertEquals("actionsJson must NOT be wiped out on toggle", initialJson, saved2.actionsJson)
+        assertEquals(1600000000000L, saved2.createdAt)
+        assertEquals(42L, saved2.hitCount)
+        assertFalse(saved2.enabled)
+
+        // 3. Fallback recovery: if caller passes empty actionsJson, createdAt=0, hitCount=0 on update, recover from existing Realm object
+        val blankJsonRule = AutomationRule(id = 42L, name = "Blank JSON Rule", actionsJson = "", createdAt = 0L, hitCount = 0L)
+        repo.saveRule(blankJsonRule)
+        val saved3 = captor.allValues.last()
+        assertEquals("actionsJson must be recovered from existing Realm object if blank on update", initialJson, saved3.actionsJson)
+        assertEquals("createdAt must be preserved from existing Realm object", 1600000000000L, saved3.createdAt)
+        assertEquals("hitCount must be preserved from existing Realm object", 42L, saved3.hitCount)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 7. Step-Level Retry Idempotency in AutomationActionWorker
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testStepLevelRetryIdempotencySkipsCompletedForwardActions() {
+        val workId = UUID.randomUUID().toString()
+        val mockContext = dummyContext()
+        val mockMessageRepo = Mockito.mock(MessageRepository::class.java)
+        val mockConvRepo = Mockito.mock(ConversationRepository::class.java)
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val steps = listOf(
+            AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15551234567"),
+            AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+        )
+        val actionsJson = AutomationActionStepSerializer.toJson(steps)
+        val inputData = androidx.work.Data.Builder()
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 999L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 888L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "12345")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Hello world")
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
+            isAccessible = true
+            set(workerParams, 1) // retry attempt
+        }
+
+        // Simulate that Step 0 (FORWARD_SMS) already completed on previous attempt
+        AutomationActionWorker.clearLedger()
+        AutomationActionWorker.markStepCompleted(workId, 0, mockContext)
+
+        val worker = AutomationActionWorker(mockContext, workerParams)
+        worker.messageRepo = mockMessageRepo
+        worker.conversationRepo = mockConvRepo
+        worker.notificationManager = mockNotificationManager
+
+        val result = worker.doWork()
+
+        // Verify Step 0 was skipped: sendNewMessages was NOT re-executed on retry
+        // Step 1 (DELETE) was executed, and no other messageRepo calls occurred
+        Mockito.verify(mockMessageRepo).deleteMessages(listOf(999L))
+        Mockito.verifyNoMoreInteractions(mockMessageRepo)
+        assertEquals(androidx.work.ListenableWorker.Result.success(), result)
+
+        // Verify ledger was cleared on success
+        assertTrue(AutomationActionWorker.getCompletedSteps(workId, mockContext).isEmpty())
+    }
+
+    @Test
+    fun testWorkerHaltsAndRetriesWhenStopped() {
+        val workId = UUID.randomUUID().toString()
+        val mockContext = dummyContext()
+        val mockMessageRepo = Mockito.mock(MessageRepository::class.java)
+        val mockConvRepo = Mockito.mock(ConversationRepository::class.java)
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val steps = listOf(
+            AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+        )
+        val actionsJson = AutomationActionStepSerializer.toJson(steps)
+        val inputData = androidx.work.Data.Builder()
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 999L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 888L)
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
+            isAccessible = true
+            set(workerParams, 0)
+        }
+
+        val worker = AutomationActionWorker(mockContext, workerParams)
+        worker.messageRepo = mockMessageRepo
+        worker.conversationRepo = mockConvRepo
+        worker.notificationManager = mockNotificationManager
+
+        // Signal stop
+        worker.stop()
+
+        val result = worker.doWork()
+
+        assertEquals("When stopped, worker must return Result.retry()",
+            androidx.work.ListenableWorker.Result.retry(), result)
+        // Verify deleteMessages was NOT executed
+        Mockito.verifyNoMoreInteractions(mockMessageRepo)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 8. Pure Local Delete vs Async Forward + Delete Visibility Invariant
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testPureLocalDeleteDropsMessageWhileAsyncForwardKeepsMessageVisible() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val contactsRepo = FakeContactRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+
+        val interactor = ExecuteAutomations(dummyContext(), autoRepo, contactsRepo, messageRepo, convRepo)
+
+        // Case A: Pure local delete rule (no async steps)
+        val pureLocalDeleteRule = AutomationRule(
+            id = 100L,
+            name = "Pure Local Delete",
+            enabled = true,
+            matchBody = "SpamLocal",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+        autoRepo.rules.clear()
+        autoRepo.rules.add(pureLocalDeleteRule)
+
+        val msgLocal = createMessage(1001L, 501L, "12345", "SpamLocal message")
+        val resultLocal = interactor.execute(msgLocal)
+
+        // Must be Dropped immediately so notification and UI are suppressed
+        assertTrue("Pure local delete must drop message immediately",
+            resultLocal is ExecuteAutomations.ExecutionResult.Dropped)
+        assertEquals(listOf(1001L), messageRepo.deletedMessageIds)
+
+        // Case B: Async forward + delete rule
+        val asyncForwardDeleteRule = AutomationRule(
+            id = 200L,
+            name = "Forward SMS then Delete",
+            enabled = true,
+            matchBody = "ForwardAndDelete",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559876543"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+        autoRepo.rules.clear()
+        autoRepo.rules.add(asyncForwardDeleteRule)
+        messageRepo.deletedMessageIds.clear()
+
+        val msgAsync = createMessage(1002L, 502L, "12345", "ForwardAndDelete incoming OTP")
+        val resultAsync = interactor.execute(msgAsync)
+
+        // Must NOT be dropped! isDropped = false keeps message visible until worker completes forwarding and deletes
+        assertTrue("Async forward + delete must keep message visible (ExecutionResult.Normal)",
+            resultAsync is ExecuteAutomations.ExecutionResult.Normal)
+        assertFalse("Message must NOT be deleted synchronously before forwarding finishes",
+            messageRepo.deletedMessageIds.contains(1002L))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 9. Rapid Double-Save and Toggle Throttling
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testRapidDoubleSaveThrottlingEmitsOnlyOneSave() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val presenter = EditAutomationPresenter(autoRepo)
+        val view = TestEditAutomationView()
+        presenter.bindIntents(view)
+
+        view.nameSubject.onNext("Throttled Rule")
+        view.matchSenderSubject.onNext("12345")
+
+        // Fire two rapid save clicks immediately
+        view.saveClicksSubject.onNext(Unit)
+        view.saveClicksSubject.onNext(Unit)
+
+        assertEquals("throttleFirst(500ms) must allow only 1 save event from rapid double-click",
+            1, autoRepo.saveCount)
+        assertEquals(1, autoRepo.rules.size)
+        assertEquals("Throttled Rule", autoRepo.rules[0].name)
+    }
+
+    @Test
+    fun testRapidToggleThrottlingEmitsOnlyOneToggle() {
+        val rule = AutomationRule(id = 55L, name = "Rule 55", enabled = true)
+        val autoRepo = FakeAutomationRuleRepo()
+        autoRepo.rules.add(rule)
+
+        val presenter = AutomationsPresenter(autoRepo)
+        val toggleSubject = PublishSubject.create<Long>()
+        val lifecycleOwner = object : LifecycleOwner {
+            private val registry = LifecycleRegistry(this).apply {
+                currentState = Lifecycle.State.RESUMED
+            }
+            override val lifecycle: Lifecycle get() = registry
+        }
+        val view = object : AutomationsView {
+            override val lifecycle: Lifecycle get() = lifecycleOwner.lifecycle
+            override fun addRuleClicks(): Observable<*> = Observable.empty<Unit>()
+            override fun editRuleClicks(): Observable<Long> = Observable.empty<Long>()
+            override fun deleteRuleClicks(): Observable<Long> = Observable.empty<Long>()
+            override fun deleteRuleConfirmed(): Observable<Long> = Observable.empty<Long>()
+            override fun toggleRuleClicks(): Observable<Long> = toggleSubject
+            override fun showEditRule(ruleId: Long) {}
+            override fun confirmDelete(ruleId: Long) {}
+            override fun render(state: AutomationsState) {}
+        }
+        presenter.bindIntents(view)
+
+        // Rapidly toggle rule twice in succession
+        toggleSubject.onNext(55L)
+        toggleSubject.onNext(55L)
+
+        // Only 1 saveRule call should have passed through throttleFirst(300ms)
+        assertEquals("throttleFirst(300ms) must allow only 1 toggle event from rapid double-click",
+            1, autoRepo.saveCount)
     }
 }

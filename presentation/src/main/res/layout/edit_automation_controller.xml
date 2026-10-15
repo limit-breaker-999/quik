@@ -190,9 +190,9 @@
                 </LinearLayout>
 
                 <!-- Preset regex patterns button -->
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/presetsButton"
-                    style="@style/Widget.AppCompat.Button.Borderless"
+                    style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/automation_use_preset"
@@ -289,41 +289,41 @@
                     android:columnCount="3"
                     android:layout_marginTop="4dp">
 
-                    <Button
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/delayNone"
-                        style="@style/Widget.AppCompat.Button.Borderless"
+                        style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_columnWeight="1"
                         android:text="@string/automation_delay_none" />
 
-                    <Button
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/delay30s"
-                        style="@style/Widget.AppCompat.Button.Borderless"
+                        style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_columnWeight="1"
                         android:text="@string/automation_delay_30s" />
 
-                    <Button
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/delay1m"
-                        style="@style/Widget.AppCompat.Button.Borderless"
+                        style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_columnWeight="1"
                         android:text="@string/automation_delay_1m" />
 
-                    <Button
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/delay5m"
-                        style="@style/Widget.AppCompat.Button.Borderless"
+                        style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_columnWeight="1"
                         android:text="@string/automation_delay_5m" />
 
-                    <Button
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/delay1h"
-                        style="@style/Widget.AppCompat.Button.Borderless"
+                        style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_columnWeight="1"
@@ -376,9 +376,9 @@
                     android:orientation="vertical" />
 
                 <!-- + Add Action Step Button -->
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/addActionStepButton"
-                    style="@style/Widget.AppCompat.Button.Colored"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/automation_add_action_step"
@@ -389,9 +389,8 @@
         </com.google.android.material.card.MaterialCardView>
 
         <!-- ═══════════ SAVE BUTTON ═══════════ -->
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/saveButton"
-            style="@style/Widget.AppCompat.Button.Colored"
             android:layout_width="match_parent"
             android:layout_height="52dp"
             android:layout_marginStart="16dp"

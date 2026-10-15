@@ -167,8 +167,8 @@ class BackupController : QkController<BackupControllerBinding, BackupView, Backu
             binding.progressBar.indeterminateTintList = ColorStateList.valueOf(theme.theme)
             binding.progressBar.progressTintList = ColorStateList.valueOf(theme.theme)
             binding.fab.setBackgroundTint(theme.theme)
-            binding.fabIcon.setTint(theme.textPrimary)
-            binding.fabLabel.setTextColor(theme.textPrimary)
+            binding.fab.iconTint = ColorStateList.valueOf(theme.textPrimary)
+            binding.fab.setTextColor(theme.textPrimary)
         }
 
         // Make the list titles bold
@@ -246,12 +246,12 @@ class BackupController : QkController<BackupControllerBinding, BackupView, Backu
             stopRestoreDialog?.setShowing(false)
         }
 
-        binding.fabIcon.setImageResource(when (state.upgraded) {
+        binding.fab.setIconResource(when (state.upgraded) {
             true -> R.drawable.ic_file_upload_black_24dp
             false -> R.drawable.ic_star_black_24dp
         })
 
-        binding.fabLabel.setText(when (state.upgraded) {
+        binding.fab.setText(when (state.upgraded) {
             true -> R.string.backup_now
             false -> R.string.title_qksms_plus
         })

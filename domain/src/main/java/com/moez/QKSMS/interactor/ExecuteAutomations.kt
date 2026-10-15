@@ -206,12 +206,12 @@ class ExecuteAutomations @Inject constructor(
                 }
 
                 if (rule.delayMs == 0L) {
-                    // Instant suppression: if delete is in sequence with 0 delay, drop message & notification
-                    if (hasDelete) {
-                        isDropped = true
-                    }
-
                     if (!hasAsync) {
+                        // Instant suppression: pure local delete drops message & notification immediately
+                        if (hasDelete) {
+                            isDropped = true
+                        }
+
                         // Execute local database operations in sequence immediately
                         for (step in steps) {
                             when (step.action) {
@@ -227,7 +227,8 @@ class ExecuteAutomations @Inject constructor(
                             }
                         }
                     } else {
-                        // Contains async actions: schedule worker to execute the sequence
+                        // Contains async actions: do not drop message yet so it remains visible
+                        // until AutomationActionWorker executes forwarding and finishes deletion
                         scheduleAction(rule, snap)
                     }
                 } else {
