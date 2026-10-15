@@ -48,6 +48,13 @@ class ConversationsAdapter @Inject constructor(
 ) : QkRealmAdapter<Conversation, QkBindingViewHolder<ConversationListItemBinding>>() {
     private val disposables = CompositeDisposable()
 
+    // Theme attribute resolution is expensive; cache per adapter lifetime
+    // (activities recreate on theme change, re-inflating adapters).
+    // Resolved against the *activity* context so dynamic-color attrs match.
+    private var cachedPrimary: Int? = null
+    private var cachedOnSurface: Int? = null
+    private var cachedOnSurfaceVariant: Int? = null
+
     var hasScheduledConversation: Set<Long> = emptySet()
         set(value) {
             if (field == value) return
@@ -100,9 +107,10 @@ class ConversationsAdapter @Inject constructor(
         }
 
         val isUnread = conversation.unread
-        val colorPrimary = context.resolveThemeColor(R.attr.colorPrimary)
-        val colorOnSurface = context.resolveThemeColor(R.attr.colorOnSurface)
-        val colorOnSurfaceVariant = context.resolveThemeColor(R.attr.colorOnSurfaceVariant)
+        val actx = binding.root.context
+        val colorPrimary = cachedPrimary ?: actx.resolveThemeColor(R.attr.colorPrimary).also { cachedPrimary = it }
+        val colorOnSurface = cachedOnSurface ?: actx.resolveThemeColor(R.attr.colorOnSurface).also { cachedOnSurface = it }
+        val colorOnSurfaceVariant = cachedOnSurfaceVariant ?: actx.resolveThemeColor(R.attr.colorOnSurfaceVariant).also { cachedOnSurfaceVariant = it }
 
         if (isUnread) {
             binding.title.setTypeface(binding.title.typeface, Typeface.BOLD)
