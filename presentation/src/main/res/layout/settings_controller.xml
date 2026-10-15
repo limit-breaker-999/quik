@@ -67,16 +67,16 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/night"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:icon="@drawable/ic_invert_colors_black_24dp"
+                    app:icon="@drawable/ic_dark_mode_24dp"
                     app:title="@string/settings_night_title"
                     tools:summary="Automatic" />
 
@@ -106,10 +106,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/textSize"
@@ -120,10 +120,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/autoColor"
@@ -135,10 +135,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/systemFont"
@@ -150,16 +150,16 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/showStt"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:icon="@drawable/ic_speech_to_text_black"
+                    app:icon="@drawable/ic_mic_24dp"
                     app:title="@string/settings_system_show_stt_title"
                     app:widget="@layout/settings_switch_widget" />
 
@@ -207,10 +207,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/delayed"
@@ -222,10 +222,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/swipeActions"
@@ -238,42 +238,42 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/delivery"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:icon="@drawable/ic_check_white_24dp"
+                    app:icon="@drawable/ic_done_all_24dp"
                     app:summary="@string/settings_delivery_summary"
                     app:title="@string/settings_delivery_title"
                     app:widget="@layout/settings_switch_widget" />
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/unreadAtTop"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:icon="@drawable/ic_unreadattop_all_black_24dp"
+                    app:icon="@drawable/ic_mark_chat_unread_24dp"
                     app:summary="@string/settings_unread_at_top_summary"
                     app:title="@string/settings_unread_at_top_title"
                     app:widget="@layout/settings_switch_widget" />
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/signature"
@@ -284,10 +284,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/unicode"
@@ -300,10 +300,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/mobileOnly"
@@ -316,10 +316,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/longAsMms"
@@ -332,10 +332,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/mmsSize"
@@ -348,26 +348,26 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/messsageLinkHandling"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:visibility="visible"
-                    app:icon="@android:drawable/stat_sys_warning"
+                    app:icon="@drawable/ic_warning_amber_24dp"
                     app:title="@string/settings_mms_weblink_title"
                     tools:summary="100KB" />
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/disableScreenshots"
@@ -409,7 +409,7 @@
                     android:id="@+id/automations"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:icon="@drawable/ic_av_timer_black_24dp"
+                    app:icon="@drawable/ic_auto_mode_24dp"
                     app:title="@string/settings_automations_title"
                     app:summary="@string/settings_automations_summary" />
 
@@ -460,10 +460,10 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="0.5dp"
-                    android:layout_marginStart="72dp"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
                     android:layout_marginEnd="16dp"
-                    android:background="?android:attr/divider" />
+                    android:background="?attr/colorOutlineVariant" />
 
                 <dev.octoshrimpy.quik.common.widget.PreferenceView
                     android:id="@+id/about"

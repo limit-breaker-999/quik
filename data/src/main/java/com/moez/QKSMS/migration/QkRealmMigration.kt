@@ -22,6 +22,9 @@ import android.annotation.SuppressLint
 import dev.octoshrimpy.quik.extensions.map
 import dev.octoshrimpy.quik.mapper.CursorToContactImpl
 import dev.octoshrimpy.quik.util.Preferences
+import dev.octoshrimpy.quik.model.AutomationActionStep
+import dev.octoshrimpy.quik.model.AutomationActionStepSerializer
+import dev.octoshrimpy.quik.model.AutomationRule
 import io.realm.DynamicRealm
 import io.realm.DynamicRealmObject
 import io.realm.FieldAttribute
@@ -37,7 +40,7 @@ class QkRealmMigration @Inject constructor(
 ) : RealmMigration {
 
     companion object {
-        const val SCHEMA_VERSION: Long = 17
+        const val SCHEMA_VERSION: Long = 18
     }
 
     @SuppressLint("ApplySharedPref")
@@ -329,6 +332,22 @@ class QkRealmMigration @Inject constructor(
             realm.schema.create("AutomationReplyState")
                 .addField("id", String::class.java, FieldAttribute.PRIMARY_KEY, FieldAttribute.REQUIRED)
                 .addField("lastReplyAt", Long::class.java, FieldAttribute.REQUIRED)
+
+            version++
+        }
+
+        if (version == 17L) {
+            realm.schema.get("AutomationRule")
+                ?.addField("actionsJson", String::class.java, FieldAttribute.REQUIRED)
+                ?.transform { obj ->
+                    val act = obj.getString("action") ?: AutomationRule.ACTION_DELETE
+                    val phone = obj.getString("forwardToPhone") ?: ""
+                    val url = obj.getString("forwardToUrl") ?: ""
+                    val appendSender = obj.getBoolean("appendSenderToForward")
+                    val template = obj.getString("replyTemplate") ?: ""
+                    val step = AutomationActionStep(act, phone, url, appendSender, template)
+                    obj.setString("actionsJson", AutomationActionStepSerializer.toJson(listOf(step)))
+                }
 
             version++
         }
