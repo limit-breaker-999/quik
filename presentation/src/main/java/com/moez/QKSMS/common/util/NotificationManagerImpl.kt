@@ -141,6 +141,11 @@ class NotificationManagerImpl @Inject constructor(
         }
 
         val conversation = conversationRepo.getConversation(threadId) ?: return
+        if (conversation.archived) {
+            notificationManager.cancel(threadId.toInt())
+            notificationManager.cancel(threadId.toInt() + 100000)
+            return
+        }
         val lastRecipient = conversation.lastMessage?.let { lastMessage ->
             conversation.recipients.find { recipient ->
                 phoneNumberUtils.compare(recipient.address, lastMessage.address)

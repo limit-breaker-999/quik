@@ -80,7 +80,7 @@ public class MmsConfigManager {
                     new IntentFilter("LOADED");
 
             try {
-                context.registerReceiver(mReceiver, intentFilterLoaded);
+                androidx.core.content.ContextCompat.registerReceiver(context, mReceiver, intentFilterLoaded, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
             } catch (Exception e) {
 
             }

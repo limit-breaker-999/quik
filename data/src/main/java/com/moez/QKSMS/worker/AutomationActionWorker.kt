@@ -1,6 +1,8 @@
 package dev.octoshrimpy.quik.worker
 
 import android.content.Context
+import android.content.pm.ServiceInfo
+import android.os.Build
 import androidx.work.ForegroundInfo
 import androidx.work.Worker
 import androidx.work.WorkerParameters
@@ -19,6 +21,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
     : Worker(appContext, workerParams) {
 
     companion object {
+        const val NOTIFICATION_ID_FOREGROUND_WORKER = 10001
         const val KEY_RULE_ID = "ruleId"
         const val KEY_MESSAGE_ID = "messageId"
         const val KEY_THREAD_ID = "threadId"
@@ -58,12 +61,19 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
             when (action) {
                 AutomationRule.ACTION_DELETE -> {
                     if (messageId >= 0) messageRepo.deleteMessages(listOf(messageId))
+                    if (threadId >= 0) notificationManager.update(threadId)
                 }
                 AutomationRule.ACTION_ARCHIVE -> {
-                    if (threadId >= 0) conversationRepo.markArchived(threadId)
+                    if (threadId >= 0) {
+                        conversationRepo.markArchived(threadId)
+                        notificationManager.update(threadId)
+                    }
                 }
                 AutomationRule.ACTION_MARK_READ -> {
-                    if (threadId >= 0) messageRepo.markRead(listOf(threadId))
+                    if (threadId >= 0) {
+                        messageRepo.markRead(listOf(threadId))
+                        notificationManager.update(threadId)
+                    }
                 }
                 AutomationRule.ACTION_FORWARD_SMS -> {
                     val phone = inputData.getString(KEY_FORWARD_PHONE) ?: return Result.failure()
@@ -121,7 +131,16 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
         }
     }
 
-    override fun getForegroundInfo() = ForegroundInfo(
-        0, notificationManager.getForegroundNotificationForWorkersOnOlderAndroids()
-    )
+    override fun getForegroundInfo(): ForegroundInfo {
+        val notification = notificationManager.getForegroundNotificationForWorkersOnOlderAndroids()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                NOTIFICATION_ID_FOREGROUND_WORKER,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(NOTIFICATION_ID_FOREGROUND_WORKER, notification)
+        }
+    }
 }

@@ -22,9 +22,22 @@ class ExecuteAutomations @Inject constructor(
     private val conversationRepo: ConversationRepository
 ) {
 
-    sealed class ExecutionResult {
-        object Normal : ExecutionResult()
-        object Dropped : ExecutionResult()
+    sealed class ExecutionResult(val isArchived: Boolean) {
+        class Normal(isArchived: Boolean = false) : ExecutionResult(isArchived)
+        class Dropped(isArchived: Boolean = false) : ExecutionResult(isArchived)
+    }
+
+    private class InterruptibleCharSequence(private val inner: CharSequence) : CharSequence {
+        override val length: Int get() = inner.length
+        override fun get(index: Int): Char {
+            if (Thread.currentThread().isInterrupted) {
+                throw java.util.concurrent.CancellationException("Regex matching interrupted")
+            }
+            return inner[index]
+        }
+        override fun subSequence(startIndex: Int, endIndex: Int): CharSequence =
+            InterruptibleCharSequence(inner.subSequence(startIndex, endIndex))
+        override fun toString(): String = inner.toString()
     }
 
     companion object {
@@ -39,15 +52,75 @@ class ExecuteAutomations @Inject constructor(
         const val KEY_SENDER_ADDRESS = "senderAddress"
         const val KEY_MESSAGE_BODY = "messageBody"
         const val KEY_SUB_ID = "subId"
-        // Shared daemon thread: one per process, not one per match (BUG-031)
-        private val REGEX_EXECUTOR = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        // Bounded daemon thread pool so stuck regex evaluations do not wedge subsequent matches or cause OOM (BUG-031)
+        private val REGEX_EXECUTOR = java.util.concurrent.ThreadPoolExecutor(
+            1, 4, 30L, java.util.concurrent.TimeUnit.SECONDS,
+            java.util.concurrent.LinkedBlockingQueue(16)
+        ) { r ->
             Thread(r, "automation-regex").apply { isDaemon = true }
         }
         private const val MAX_BODY_LENGTH = 8 * 1024
+        private const val MAX_DATA_BODY_BYTES = 4096
         private const val MAX_REGEX_PATTERN_LENGTH = 256
         private const val MAX_REGEX_INPUT_LENGTH = 4096
         private const val REGEX_MATCH_TIMEOUT_MS = 500L
         private const val WORKER_CLASS = "dev.octoshrimpy.quik.worker.AutomationActionWorker"
+
+        fun truncateUtf8(input: String, maxBytes: Int): String {
+            if (maxBytes <= 0) return ""
+            val bytes = input.toByteArray(Charsets.UTF_8)
+            if (bytes.size <= maxBytes) return input
+            val decoder = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.IGNORE)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.IGNORE)
+            val byteBuffer = java.nio.ByteBuffer.wrap(bytes, 0, maxBytes)
+            val charBuffer = java.nio.CharBuffer.allocate(maxBytes)
+            decoder.decode(byteBuffer, charBuffer, true)
+            decoder.flush(charBuffer)
+            charBuffer.flip()
+            return charBuffer.toString()
+        }
+
+        /**
+         * Runs a user-supplied regex against a bounded input with a hard timeout.
+         * Catastrophic backtracking otherwise hangs ReceiveSmsWorker.doWork forever.
+         * Returns false for invalid patterns, timeouts, or over-long inputs.
+         */
+        fun safeRegexMatch(pattern: String, caseSensitive: Boolean, input: String): Boolean {
+            // Reject absurdly long patterns outright
+            if (pattern.length > MAX_REGEX_PATTERN_LENGTH) return false
+            // Cap the searchable region; automations match on message previews
+            val boundedInput = if (input.length > MAX_REGEX_INPUT_LENGTH) input.substring(0, MAX_REGEX_INPUT_LENGTH) else input
+
+            val flags = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
+            val regex = try {
+                Regex(pattern, flags)
+            } catch (e: Exception) {
+                return false
+            }
+
+            return try {
+                val interruptible = InterruptibleCharSequence(boundedInput)
+                val future = REGEX_EXECUTOR.submit<Boolean> { regex.containsMatchIn(interruptible) }
+                try {
+                    future.get(REGEX_MATCH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                } catch (e: java.util.concurrent.TimeoutException) {
+                    future.cancel(true)
+                    Timber.w("Automation regex timed out (catastrophic backtracking): $pattern")
+                    false
+                } catch (e: InterruptedException) {
+                    future.cancel(true)
+                    Thread.currentThread().interrupt()
+                    Timber.w("Automation regex interrupted: $pattern")
+                    false
+                } catch (e: Exception) {
+                    false
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error executing regex match: $pattern")
+                false
+            }
+        }
     }
 
     /**
@@ -65,7 +138,7 @@ class ExecuteAutomations @Inject constructor(
 
     fun execute(message: Message): ExecutionResult {
         val rules = automationRepo.getEnabledRules()
-        if (rules.isEmpty()) return ExecutionResult.Normal
+        if (rules.isEmpty()) return ExecutionResult.Normal(false)
 
         // Copy all needed fields off the managed object before any rule runs
         val snap = Snapshot(
@@ -78,6 +151,7 @@ class ExecuteAutomations @Inject constructor(
 
         val isContact = contactsRepo.isContact(snap.address)
         var isDropped = false
+        var isArchived = false
 
         for (rule in rules) {
             if (!matches(rule, snap, isContact)) continue
@@ -94,6 +168,10 @@ class ExecuteAutomations @Inject constructor(
             // execution (immediate actions have no worker to report back).
             Timber.d("AutomationRule '${rule.name}' matched message from ${snap.address}")
             automationRepo.incrementHitCount(rule.id)
+
+            if (rule.action == AutomationRule.ACTION_ARCHIVE) {
+                isArchived = true
+            }
 
             if (rule.delayMs == 0L) {
                 when (rule.action) {
@@ -119,7 +197,7 @@ class ExecuteAutomations @Inject constructor(
             }
         }
 
-        return if (isDropped) ExecutionResult.Dropped else ExecutionResult.Normal
+        return if (isDropped) ExecutionResult.Dropped(isArchived) else ExecutionResult.Normal(isArchived)
     }
 
     private fun matches(rule: AutomationRule, snap: Snapshot, isContact: Boolean): Boolean {
@@ -145,35 +223,6 @@ class ExecuteAutomations @Inject constructor(
         }
     }
 
-    /**
-     * Runs a user-supplied regex against a bounded input with a hard timeout.
-     * Catastrophic backtracking otherwise hangs ReceiveSmsWorker.doWork forever.
-     * Returns false for invalid patterns, timeouts, or over-long inputs.
-     */
-    private fun safeRegexMatch(pattern: String, caseSensitive: Boolean, input: String): Boolean {
-        // Reject absurdly long patterns outright
-        if (pattern.length > MAX_REGEX_PATTERN_LENGTH) return false
-        // Cap the searchable region; automations match on message previews
-        val boundedInput = if (input.length > MAX_REGEX_INPUT_LENGTH) input.substring(0, MAX_REGEX_INPUT_LENGTH) else input
-
-        val flags = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
-        val regex = try {
-            Regex(pattern, flags)
-        } catch (e: Exception) {
-            return false
-        }
-
-        val future = REGEX_EXECUTOR.submit<Boolean> { regex.containsMatchIn(boundedInput) }
-        return try {
-            future.get(REGEX_MATCH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-        } catch (e: java.util.concurrent.TimeoutException) {
-            future.cancel(true)
-            Timber.w("Automation regex timed out (catastrophic backtracking): $pattern")
-            false
-        } catch (e: java.util.concurrent.ExecutionException) {
-            false
-        }
-    }
 
     @Suppress("UNCHECKED_CAST")
     private fun scheduleAction(rule: AutomationRule, snap: Snapshot) {
@@ -190,7 +239,7 @@ class ExecuteAutomations @Inject constructor(
             .putInt(KEY_SUB_ID, snap.subId)
             // WorkManager Data is limited to 10KB; cap the body to keep the
             // payload safely under the limit (handles long MMS bodies).
-            .putString(KEY_MESSAGE_BODY, snap.body)
+            .putString(KEY_MESSAGE_BODY, truncateUtf8(snap.body, MAX_DATA_BODY_BYTES))
             .build()
         val workerClass = Class.forName(WORKER_CLASS)
             .asSubclass(androidx.work.ListenableWorker::class.java)

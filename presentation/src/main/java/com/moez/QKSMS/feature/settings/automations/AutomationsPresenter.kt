@@ -47,5 +47,10 @@ class AutomationsPresenter @Inject constructor(
                 automationRepo.saveRule(rule.apply { enabled = !enabled })
             }
     }
+
+    override fun onCleared() {
+        super.onCleared()
+        automationRepo.close()
+    }
 }
 

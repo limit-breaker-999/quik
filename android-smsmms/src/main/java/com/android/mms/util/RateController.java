@@ -126,8 +126,11 @@ public class RateController {
         }
         sMutexLock = true;
 
-        mContext.registerReceiver(mBroadcastReceiver,
-                new IntentFilter(RATE_LIMIT_CONFIRMED_ACTION));
+        androidx.core.content.ContextCompat.registerReceiver(
+                mContext,
+                mBroadcastReceiver,
+                new IntentFilter(RATE_LIMIT_CONFIRMED_ACTION),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
 
         mAnswer = NO_ANSWER;
         try {
