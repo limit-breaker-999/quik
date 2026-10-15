@@ -90,6 +90,16 @@ class MessagesAdapter @Inject constructor(
     private val prefs: Preferences,
     private val textViewStyler: TextViewStyler,
 ) : QkRealmAdapter<Message, QkViewHolder>() {
+
+    // Theme attr resolution is expensive and this adapter binds per message
+    // row. Resolved lazily against the itemView's *activity* context so
+    // dynamic-color attrs match; cached for the adapter lifetime (activities
+    // recreate on theme change, re-inflating adapters).
+    private var cachedPrimary: Int? = null
+    private var cachedOnPrimary: Int? = null
+    private var cachedSurfaceContainerHigh: Int? = null
+    private var cachedOnSurface: Int? = null
+
     class AudioState(
         var partId: Long = -1,
         var state: QkMediaPlayer.PlayingState = QkMediaPlayer.PlayingState.Stopped,
@@ -269,13 +279,14 @@ class MessagesAdapter @Inject constructor(
                 binding.resendIcon.visibility = View.GONE
             }
 
+            val actx = holder.itemView.context
             val primaryColor = if (prefs.dynamicColor.get() && !prefs.black.get()) {
-                context.resolveThemeColor(R.attr.colorPrimary)
+                cachedPrimary ?: actx.resolveThemeColor(R.attr.colorPrimary).also { cachedPrimary = it }
             } else {
                 theme.theme
             }
             val onPrimaryColor = if (prefs.dynamicColor.get() && !prefs.black.get()) {
-                context.resolveThemeColor(R.attr.colorOnPrimary)
+                cachedOnPrimary ?: actx.resolveThemeColor(R.attr.colorOnPrimary).also { cachedOnPrimary = it }
             } else {
                 theme.textPrimary
             }
@@ -306,10 +317,13 @@ class MessagesAdapter @Inject constructor(
                 setVisible(!canGroup(message, next), View.INVISIBLE)
             }
 
-            val surfaceContainerHigh = context.resolveThemeColor(R.attr.colorSurfaceContainerHigh)
-            val onSurface = context.resolveThemeColor(R.attr.colorOnSurface)
+            val actx = holder.itemView.context
+            val surfaceContainerHigh = cachedSurfaceContainerHigh
+                ?: actx.resolveThemeColor(R.attr.colorSurfaceContainerHigh).also { cachedSurfaceContainerHigh = it }
+            val onSurface = cachedOnSurface
+                ?: actx.resolveThemeColor(R.attr.colorOnSurface).also { cachedOnSurface = it }
             val colorPrimary = if (prefs.dynamicColor.get() && !prefs.black.get()) {
-                context.resolveThemeColor(R.attr.colorPrimary)
+                cachedPrimary ?: actx.resolveThemeColor(R.attr.colorPrimary).also { cachedPrimary = it }
             } else {
                 theme.theme
             }
@@ -439,10 +453,14 @@ class MessagesAdapter @Inject constructor(
             if (emojiOnly) {
                 backgroundTintList = null
             } else {
+                val actx = body.context
                 val bubbleBg = if (message.isMe()) {
-                    if (prefs.dynamicColor.get() && !prefs.black.get()) context.resolveThemeColor(R.attr.colorPrimary) else theme.theme
+                    if (prefs.dynamicColor.get() && !prefs.black.get())
+                        cachedPrimary ?: actx.resolveThemeColor(R.attr.colorPrimary).also { cachedPrimary = it }
+                    else theme.theme
                 } else {
-                    context.resolveThemeColor(R.attr.colorSurfaceContainerHigh)
+                    cachedSurfaceContainerHigh
+                        ?: actx.resolveThemeColor(R.attr.colorSurfaceContainerHigh).also { cachedSurfaceContainerHigh = it }
                 }
                 setBackgroundTint(bubbleBg)
             }

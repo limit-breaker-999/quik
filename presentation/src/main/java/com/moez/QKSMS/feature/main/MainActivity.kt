@@ -178,6 +178,8 @@ class MainActivity : QkThemedActivity(), MainView {
                 .autoDisposable(scope())
                 .subscribe { theme ->
                     // Set the color for the drawer icons
+                    // Drawer icons use the style-level state-list tint; only
+                    // override with legacy accent when dynamic color is off
                     if (!prefs.dynamicColor.get() || prefs.black.get()) {
                         val states = arrayOf(
                             intArrayOf(android.R.attr.state_activated),
@@ -191,8 +193,12 @@ class MainActivity : QkThemedActivity(), MainView {
                             binding.drawer.archivedIcon.imageTintList = tintList
                         }
                     } else {
-                        binding.drawer.inboxIcon.imageTintList = null
-                        binding.drawer.archivedIcon.imageTintList = null
+                        // Restore the M3 selector tint from the DrawerIcon style
+                        val m3Tint = androidx.core.content.ContextCompat.getColorStateList(
+                            this, R.color.drawer_item_icon_tint
+                        )
+                        binding.drawer.inboxIcon.imageTintList = m3Tint
+                        binding.drawer.archivedIcon.imageTintList = m3Tint
                     }
 
                     // Miscellaneous views

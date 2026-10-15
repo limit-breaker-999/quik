@@ -74,7 +74,11 @@ class SettingsController : QkController<SettingsControllerBinding, SettingsView,
     @Inject override lateinit var presenter: SettingsPresenter
 
     private val signatureDialog: TextInputDialog by lazy {
-        TextInputDialog(activity!!, context.getString(R.string.settings_signature_title), signatureSubject::onNext)
+        TextInputDialog(
+            activity ?: throw IllegalStateException("SettingsController not attached"),
+            context.getString(R.string.settings_signature_title),
+            signatureSubject::onNext
+        )
     }
 
     private val viewQksmsPlusSubject: Subject<Unit> = PublishSubject.create()
