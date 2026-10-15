@@ -47,10 +47,12 @@
     <style name="Toolbar">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">56dp</item>
+        <item name="android:elevation">0dp</item>
+        <item name="navigationIconTint">?attr/colorOnSurface</item>
 
         <!-- This needs to be set so that we can tint the toolbar and not change the background
          resource. This is mainly so that QkReplyActivity can call setClipToOutline -->
-        <item name="android:background">?attr/colorPrimary</item>
+        <item name="android:background">?attr/colorSurface</item>
         <item name="android:gravity">center_vertical</item>
     </style>
 
@@ -61,7 +63,7 @@
         <item name="android:ellipsize">end</item>
         <item name="android:gravity">start|center_vertical</item>
         <item name="android:maxLines">1</item>
-        <item name="android:textColor">?android:attr/textColorPrimary</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
         <item name="textSize">toolbar</item>
     </style>
 

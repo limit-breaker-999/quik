@@ -154,46 +154,50 @@ class ExecuteAutomations @Inject constructor(
         var isArchived = false
 
         for (rule in rules) {
-            if (!matches(rule, snap, isContact)) continue
+            try {
+                if (!matches(rule, snap, isContact)) continue
 
-            // Enforce per-thread auto-reply rate limit before counting a hit:
-            // prevents automated reply loops between two machines.
-            if (rule.action == AutomationRule.ACTION_AUTO_REPLY &&
-                !automationRepo.tryAcquireReplySlot(rule.id, snap.threadId, rule.replyRateLimitMs)) {
-                Timber.d("AutomationRule '${rule.name}' rate-limited for thread ${snap.threadId}")
-                continue
-            }
-
-            // Note: hitCount counts rule *matches*, not successful action
-            // execution (immediate actions have no worker to report back).
-            Timber.d("AutomationRule '${rule.name}' matched message from ${snap.address}")
-            automationRepo.incrementHitCount(rule.id)
-
-            if (rule.action == AutomationRule.ACTION_ARCHIVE) {
-                isArchived = true
-            }
-
-            if (rule.delayMs == 0L) {
-                when (rule.action) {
-                    AutomationRule.ACTION_DELETE -> {
-                        // Delete immediately but keep evaluating remaining rules:
-                        // e.g. a forward rule after a delete rule must still fire.
-                        // Everything needed was captured in the snapshot.
-                        messageRepo.deleteMessages(listOf(snap.id))
-                        isDropped = true
-                    }
-                    AutomationRule.ACTION_ARCHIVE -> {
-                        conversationRepo.markArchived(snap.threadId)
-                    }
-                    AutomationRule.ACTION_MARK_READ -> {
-                        messageRepo.markRead(listOf(snap.threadId))
-                    }
-                    else -> {
-                        scheduleAction(rule, snap)
-                    }
+                // Enforce per-thread auto-reply rate limit before counting a hit:
+                // prevents automated reply loops between two machines.
+                if (rule.action == AutomationRule.ACTION_AUTO_REPLY &&
+                    !automationRepo.tryAcquireReplySlot(rule.id, snap.threadId, rule.replyRateLimitMs)) {
+                    Timber.d("AutomationRule '${rule.name}' rate-limited for thread ${snap.threadId}")
+                    continue
                 }
-            } else {
-                scheduleAction(rule, snap)
+
+                // Note: hitCount counts rule *matches*, not successful action
+                // execution (immediate actions have no worker to report back).
+                Timber.d("AutomationRule '${rule.name}' matched message from ${snap.address}")
+                automationRepo.incrementHitCount(rule.id)
+
+                if (rule.action == AutomationRule.ACTION_ARCHIVE) {
+                    isArchived = true
+                }
+
+                if (rule.delayMs == 0L) {
+                    when (rule.action) {
+                        AutomationRule.ACTION_DELETE -> {
+                            // Delete immediately but keep evaluating remaining rules:
+                            // e.g. a forward rule after a delete rule must still fire.
+                            // Everything needed was captured in the snapshot.
+                            messageRepo.deleteMessages(listOf(snap.id))
+                            isDropped = true
+                        }
+                        AutomationRule.ACTION_ARCHIVE -> {
+                            conversationRepo.markArchived(snap.threadId)
+                        }
+                        AutomationRule.ACTION_MARK_READ -> {
+                            messageRepo.markRead(listOf(snap.threadId))
+                        }
+                        else -> {
+                            scheduleAction(rule, snap)
+                        }
+                    }
+                } else {
+                    scheduleAction(rule, snap)
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error executing automation rule '${rule.name}' (id: ${rule.id})")
             }
         }
 

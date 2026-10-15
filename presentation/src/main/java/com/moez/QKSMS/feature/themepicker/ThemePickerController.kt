@@ -111,10 +111,6 @@ class ThemePickerController(
 
     override fun onDetach(view: View) {
         super.onDetach(view)
-
-        themedActivity?.supportActionBar?.let { toolbar ->
-            ObjectAnimator.ofFloat(toolbar, "elevation", toolbar.elevation, 8.dpToPx(toolbar.themedContext).toFloat()).start()
-        }
     }
 
     override fun showQksmsPlusSnackbar() {

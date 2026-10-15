@@ -32,9 +32,6 @@ class MessageUtilsController : QkController<MessageUtilsControllerBinding, Messa
 
     @Inject lateinit var context: Context
     @Inject override lateinit var presenter: MessageUtilsPresenter
-    private val autoDeleteDialog: AutoDeleteDialog by lazy {
-        AutoDeleteDialog(activity!!, autoDeleteSubject::onNext)
-    }
     private val autoDeleteSubject: Subject<Int> = PublishSubject.create()
     override val autoDeduplicateClickIntent by lazy { binding.autoDeduplicate.clicks() }
     override val deduplicateClickIntent by lazy { binding.deduplicateMessages.clicks() }
@@ -94,7 +91,12 @@ class MessageUtilsController : QkController<MessageUtilsControllerBinding, Messa
     }
 
     override fun showDeduplicationConfirmationDialog(): Single<Boolean> = Single.create { emitter ->
-        AlertDialog.Builder(activity)
+        val act = activity
+        if (act == null) {
+            emitter.onSuccess(false)
+            return@create
+        }
+        AlertDialog.Builder(act)
             .setTitle(R.string.deduplicate_messages_title)
             .setMessage(R.string.deduplicate_message_confirmation_dialog_message)
             .setPositiveButton(R.string.button_continue) { _, _ -> emitter.onSuccess(true) }
@@ -110,11 +112,15 @@ class MessageUtilsController : QkController<MessageUtilsControllerBinding, Messa
 
     override fun autoDeleteChanged(): Observable<Int> = autoDeleteSubject
 
-    override fun showAutoDeleteDialog(days: Int) = autoDeleteDialog.setExpiry(days).show()
+    override fun showAutoDeleteDialog(days: Int) {
+        val act = activity ?: return
+        AutoDeleteDialog(act, autoDeleteSubject::onNext).setExpiry(days).show()
+    }
 
     override suspend fun showAutoDeleteWarningDialog(messages: Int): Boolean = withContext(Dispatchers.Main) {
+        val act = activity ?: return@withContext false
         suspendCancellableCoroutine { cont ->
-            androidx.appcompat.app.AlertDialog.Builder(activity!!)
+            androidx.appcompat.app.AlertDialog.Builder(act)
                 .setTitle(R.string.settings_auto_delete_warning)
                 .setMessage(context.resources.getString(R.string.settings_auto_delete_warning_message, messages))
                 .setOnCancelListener { cont.resume(false) }

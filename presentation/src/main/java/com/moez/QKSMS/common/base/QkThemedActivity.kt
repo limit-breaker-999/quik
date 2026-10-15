@@ -26,6 +26,7 @@ import android.os.Bundle
 import android.view.View
 import androidx.core.view.iterator
 import androidx.lifecycle.Lifecycle
+import com.google.android.material.color.DynamicColors
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
 import dev.octoshrimpy.quik.R
@@ -39,6 +40,7 @@ import dev.octoshrimpy.quik.repository.ConversationRepository
 import dev.octoshrimpy.quik.repository.MessageRepository
 import dev.octoshrimpy.quik.util.PhoneNumberUtils
 import io.reactivex.Observable
+import io.reactivex.Scheduler
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.rxkotlin.Observables
 import io.reactivex.subjects.BehaviorSubject
@@ -94,15 +96,32 @@ abstract class QkThemedActivity : QkActivity() {
             }
             .switchMap { colors.themeObservable(it.value) }
 
+    companion object {
+        fun shouldApplyDynamicColors(dynamicColor: Boolean, black: Boolean): Boolean {
+            return dynamicColor && !black
+        }
+
+        fun createRecreationTrigger(
+            triggers: List<Observable<*>>,
+            scheduler: Scheduler = AndroidSchedulers.mainThread()
+        ): Observable<Unit> {
+            return Observable.merge(triggers)
+                .debounce(400, TimeUnit.MILLISECONDS, scheduler)
+                .map { Unit }
+        }
+    }
+
     @SuppressLint("InlinedApi")
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(getActivityThemeRes(prefs.black.get()))
+        if (shouldApplyDynamicColors(prefs.dynamicColor.get(), prefs.black.get())) {
+            DynamicColors.applyIfAvailable(this)
+        }
         super.onCreate(savedInstanceState)
 
         // When certain preferences change, we need to recreate the activity
-        val triggers = listOf(prefs.nightMode, prefs.night, prefs.black, prefs.dynamicColor, prefs.textSize, prefs.systemFont)
-        Observable.merge(triggers.map { it.asObservable().skip(1) })
-                .debounce(400, TimeUnit.MILLISECONDS)
+        val triggers = listOf(prefs.theme(), prefs.nightMode, prefs.night, prefs.black, prefs.dynamicColor, prefs.textSize, prefs.systemFont)
+        createRecreationTrigger(triggers.map { it.asObservable().skip(1) })
                 .observeOn(AndroidSchedulers.mainThread())
                 .autoDisposable(scope())
                 .subscribe { recreate() }
@@ -132,6 +151,8 @@ abstract class QkThemedActivity : QkActivity() {
         // Set the color for the overflow and navigation icon
         val textSecondary = resolveThemeColor(android.R.attr.textColorSecondary)
         toolbar?.overflowIcon = toolbar?.overflowIcon?.apply { setTint(textSecondary) }
+        val colorOnSurface = resolveThemeColor(R.attr.colorOnSurface)
+        toolbar?.navigationIcon = toolbar?.navigationIcon?.apply { setTint(colorOnSurface) }
 
         // Update the colours of the menu items
         Observables.combineLatest(menu, theme) { menu, theme ->
@@ -144,6 +165,14 @@ abstract class QkThemedActivity : QkActivity() {
                 menuItem.icon = menuItem.icon?.apply { setTint(tint) }
             }
         }.autoDisposable(scope(Lifecycle.Event.ON_DESTROY)).subscribe()
+    }
+
+    override fun showBackButton(show: Boolean) {
+        super.showBackButton(show)
+        if (show) {
+            val colorOnSurface = resolveThemeColor(R.attr.colorOnSurface)
+            toolbar?.navigationIcon = toolbar?.navigationIcon?.apply { setTint(colorOnSurface) }
+        }
     }
 
     open fun getColoredMenuItems(): List<Int> {

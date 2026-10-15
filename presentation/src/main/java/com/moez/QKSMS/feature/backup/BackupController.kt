@@ -67,42 +67,55 @@ class BackupController : QkController<BackupControllerBinding, BackupView, Backu
     private val documentTreeSelectedSubject: Subject<Uri> = PublishSubject.create()
     private val documentSelectedSubject: Subject<Uri> = PublishSubject.create()
 
-    private val stopRestoreDialog by lazy {
-        AlertDialog.Builder(activity!!)
+    private var stopRestoreDialog: AlertDialog? = null
+    private var selectLocationRationaleDialog: AlertDialog? = null
+    private var selectedBackupErrorDialog: AlertDialog? = null
+    private var selectedBackupDetailsDialog: AlertDialog? = null
+
+    private fun getStopRestoreDialog(): AlertDialog? {
+        val act = activity ?: return null
+        return stopRestoreDialog ?: AlertDialog.Builder(act)
                 .setTitle(R.string.backup_restore_stop_title)
                 .setMessage(R.string.backup_restore_stop_message)
                 .setPositiveButton(R.string.button_stop, stopRestoreConfirmSubject)
                 .setNegativeButton(R.string.button_cancel, stopRestoreCancelSubject)
                 .setCancelable(false)
                 .create()
+                .also { stopRestoreDialog = it }
     }
 
-    private val selectLocationRationaleDialog by lazy {
-        AlertDialog.Builder(activity!!)
+    private fun getSelectLocationRationaleDialog(): AlertDialog? {
+        val act = activity ?: return null
+        return selectLocationRationaleDialog ?: AlertDialog.Builder(act)
                 .setTitle(R.string.backup_select_location_rationale_title)
                 .setMessage(R.string.backup_select_location_rationale_message)
                 .setPositiveButton(R.string.button_continue, selectFolderConfirmSubject)
                 .setNegativeButton(R.string.button_cancel, selectFolderCancelSubject)
                 .setCancelable(false)
                 .create()
+                .also { selectLocationRationaleDialog = it }
     }
 
-    private val selectedBackupErrorDialog by lazy {
-        AlertDialog.Builder(activity!!)
+    private fun getSelectedBackupErrorDialog(): AlertDialog? {
+        val act = activity ?: return null
+        return selectedBackupErrorDialog ?: AlertDialog.Builder(act)
                 .setTitle(R.string.backup_selected_backup_error_title)
                 .setMessage(R.string.backup_selected_backup_error_message)
                 .setPositiveButton(R.string.button_continue, restoreErrorConfirmSubject)
                 .setCancelable(false)
                 .create()
+                .also { selectedBackupErrorDialog = it }
     }
 
-    private val selectedBackupDetailsDialog by lazy {
-        AlertDialog.Builder(activity!!)
+    private fun getSelectedBackupDetailsDialog(): AlertDialog? {
+        val act = activity ?: return null
+        return selectedBackupDetailsDialog ?: AlertDialog.Builder(act)
                 .setTitle(R.string.backup_selected_backup_details_title)
                 .setPositiveButton(R.string.backup_restore_title, confirmRestoreConfirmSubject)
                 .setNegativeButton(R.string.button_cancel, confirmRestoreCancelSubject)
                 .setCancelable(false)
                 .create()
+                .also { selectedBackupDetailsDialog = it }
     }
 
     private lateinit var openDirectory: ActivityResultLauncher<Uri?>
@@ -135,6 +148,18 @@ class BackupController : QkController<BackupControllerBinding, BackupView, Backu
         showBackButton(true)
     }
 
+    override fun onDestroyView(view: View) {
+        super.onDestroyView(view)
+        stopRestoreDialog?.dismiss()
+        stopRestoreDialog = null
+        selectLocationRationaleDialog?.dismiss()
+        selectLocationRationaleDialog = null
+        selectedBackupErrorDialog?.dismiss()
+        selectedBackupErrorDialog = null
+        selectedBackupDetailsDialog?.dismiss()
+        selectedBackupDetailsDialog = null
+    }
+
     override fun onViewCreated() {
         super.onViewCreated()
 
@@ -154,11 +179,12 @@ class BackupController : QkController<BackupControllerBinding, BackupView, Backu
     }
 
     override fun render(state: BackupState) {
+        val act = activity ?: return
         when {
             state.backupProgress.running -> {
                 binding.progressIcon.setImageResource(R.drawable.ic_file_upload_black_24dp)
                 binding.progressTitle.setText(R.string.backup_backing_up)
-                binding.progressSummary.text = state.backupProgress.getLabel(activity!!)
+                binding.progressSummary.text = state.backupProgress.getLabel(act)
                 binding.progressSummary.isVisible = binding.progressSummary.text.isNotEmpty()
                 binding.progressCancel.isVisible = false
                 val running = (state.backupProgress as? BackupRepository.Progress.Running)
@@ -174,7 +200,7 @@ class BackupController : QkController<BackupControllerBinding, BackupView, Backu
             state.restoreProgress.running -> {
                 binding.progressIcon.setImageResource(R.drawable.ic_file_download_black_24dp)
                 binding.progressTitle.setText(R.string.backup_restoring)
-                binding.progressSummary.text = state.restoreProgress.getLabel(activity!!)
+                binding.progressSummary.text = state.restoreProgress.getLabel(act)
                 binding.progressSummary.isVisible = binding.progressSummary.text.isNotEmpty()
                 binding.progressCancel.isVisible = true
                 val running = (state.restoreProgress as? BackupRepository.Progress.Running)
@@ -193,14 +219,32 @@ class BackupController : QkController<BackupControllerBinding, BackupView, Backu
             }
         }
 
-        selectLocationRationaleDialog.setShowing(state.showLocationRationale)
+        if (state.showLocationRationale) {
+            getSelectLocationRationaleDialog()?.setShowing(true)
+        } else {
+            selectLocationRationaleDialog?.setShowing(false)
+        }
 
-        selectedBackupErrorDialog.setShowing(state.showSelectedBackupError)
+        if (state.showSelectedBackupError) {
+            getSelectedBackupErrorDialog()?.setShowing(true)
+        } else {
+            selectedBackupErrorDialog?.setShowing(false)
+        }
 
-        selectedBackupDetailsDialog.setMessage(state.selectedBackupDetails)
-        selectedBackupDetailsDialog.setShowing(state.selectedBackupDetails != null)
+        if (state.selectedBackupDetails != null) {
+            getSelectedBackupDetailsDialog()?.apply {
+                setMessage(state.selectedBackupDetails)
+                setShowing(true)
+            }
+        } else {
+            selectedBackupDetailsDialog?.setShowing(false)
+        }
 
-        stopRestoreDialog.setShowing(state.showStopRestoreDialog)
+        if (state.showStopRestoreDialog) {
+            getStopRestoreDialog()?.setShowing(true)
+        } else {
+            stopRestoreDialog?.setShowing(false)
+        }
 
         binding.fabIcon.setImageResource(when (state.upgraded) {
             true -> R.drawable.ic_file_upload_black_24dp

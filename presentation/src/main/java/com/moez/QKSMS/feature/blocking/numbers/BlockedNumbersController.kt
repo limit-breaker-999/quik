@@ -79,9 +79,10 @@ class BlockedNumbersController : QkController<BlockedNumbersControllerBinding, B
     override fun saveAddress(): Observable<String> = saveAddressSubject
 
     override fun showAddDialog() {
-        val layout = BlockedNumbersAddDialogBinding.inflate(LayoutInflater.from(activity))
+        val act = activity ?: return
+        val layout = BlockedNumbersAddDialogBinding.inflate(LayoutInflater.from(act))
         val textWatcher = BlockedNumberTextWatcher(layout.input, phoneNumberUtils)
-        val dialog = AlertDialog.Builder(activity!!)
+        val dialog = AlertDialog.Builder(act)
                 .setView(layout.root)
                 .setPositiveButton(R.string.blocked_numbers_dialog_block) { _, _ ->
                     saveAddressSubject.onNext(layout.input.text.toString())

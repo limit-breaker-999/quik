@@ -80,7 +80,8 @@ class MessageContentFiltersController : QkController<MessageContentFiltersContro
     override fun saveFilter(): Observable<MessageContentFilterData> = saveFilterSubject
 
     override fun showAddDialog() {
-        val layout = MessageContentFiltersAddDialogBinding.inflate(LayoutInflater.from(activity))
+        val act = activity ?: return
+        val layout = MessageContentFiltersAddDialogBinding.inflate(LayoutInflater.from(act))
 
         (0 until layout.addDialog.childCount)
             .map { index -> layout.addDialog.getChildAt(index) }
@@ -94,7 +95,7 @@ class MessageContentFiltersController : QkController<MessageContentFiltersContro
                 layout.caseSensitivity.isEnabled = !regexChecked
             }
 
-        val dialog = AlertDialog.Builder(activity!!)
+        val dialog = AlertDialog.Builder(act)
                 .setView(layout.root)
                 .setPositiveButton(R.string.message_content_filters_dialog_create) { _, _ ->
                     var text = layout.input.text.toString();

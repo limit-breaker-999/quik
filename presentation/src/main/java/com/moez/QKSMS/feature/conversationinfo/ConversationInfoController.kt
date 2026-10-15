@@ -54,10 +54,6 @@ class ConversationInfoController(
     @Inject lateinit var externalNavigator : ExternalNavigator
     @Inject lateinit var adapter: ConversationInfoAdapter
 
-    private val nameDialog: TextInputDialog by lazy {
-        TextInputDialog(activity!!, activity!!.getString(R.string.info_name), nameChangeSubject::onNext)
-    }
-
     private val nameChangeSubject: Subject<String> = PublishSubject.create()
     private val confirmDeleteSubject: Subject<Unit> = PublishSubject.create()
 
@@ -112,7 +108,12 @@ class ConversationInfoController(
     override fun confirmDelete(): Observable<*> = confirmDeleteSubject
     override fun mediaClicks(): Observable<Long> = adapter.mediaClicks
 
-    override fun showNameDialog(name: String) = nameDialog.setText(name).show()
+    override fun showNameDialog(name: String) {
+        val act = activity ?: return
+        TextInputDialog(act, act.getString(R.string.info_name), nameChangeSubject::onNext)
+            .setText(name)
+            .show()
+    }
 
     override fun showThemePicker(recipientId: Long) {
         router.pushController(RouterTransaction.with(ThemePickerController(recipientId))
@@ -121,15 +122,18 @@ class ConversationInfoController(
     }
 
     override fun showBlockingDialog(conversations: List<Long>, block: Boolean) {
-        blockingDialog.show(activity!!, conversations, block)
+        val act = activity ?: return
+        blockingDialog.show(act, conversations, block)
     }
 
     override fun requestDefaultSms() {
-        externalNavigator.showDefaultSmsDialog(activity!!)
+        val act = activity ?: return
+        externalNavigator.showDefaultSmsDialog(act)
     }
 
     override fun showDeleteDialog() {
-        AlertDialog.Builder(activity!!)
+        val act = activity ?: return
+        AlertDialog.Builder(act)
                 .setTitle(R.string.dialog_delete_title)
                 .setMessage(resources?.getQuantityString(R.plurals.dialog_delete_message, 1))
                 .setPositiveButton(R.string.button_delete) { _, _ -> confirmDeleteSubject.onNext(Unit) }

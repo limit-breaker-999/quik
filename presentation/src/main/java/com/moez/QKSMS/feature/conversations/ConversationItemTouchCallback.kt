@@ -30,6 +30,7 @@ import dev.octoshrimpy.quik.R
 import dev.octoshrimpy.quik.common.util.Colors
 import dev.octoshrimpy.quik.common.util.extensions.dpToPx
 import dev.octoshrimpy.quik.util.Preferences
+import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.rxkotlin.Observables
 import io.reactivex.rxkotlin.plusAssign
@@ -71,6 +72,11 @@ class ConversationItemTouchCallback @Inject constructor(
         disposables += Observables
                 .combineLatest(prefs.swipeRight.asObservable(), prefs.swipeLeft.asObservable(), colors.themeObservable()
                 ) { right, left, theme ->
+                    Triple(right, left, theme)
+                }
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe { (right, left, theme) ->
                     rightAction = right
                     swipeRightIcon = iconForAction(right, theme.textPrimary)
                     leftAction = left
@@ -78,8 +84,6 @@ class ConversationItemTouchCallback @Inject constructor(
                     setDefaultSwipeDirs((if (right == Preferences.SWIPE_ACTION_NONE) 0 else ItemTouchHelper.RIGHT)
                             or (if (left == Preferences.SWIPE_ACTION_NONE) 0 else ItemTouchHelper.LEFT))
                 }
-                .subscribeOn(Schedulers.io())
-                .subscribe()
     }
 
     override fun onMove(
@@ -140,8 +144,11 @@ class ConversationItemTouchCallback @Inject constructor(
 
         // This will trigger the animation back to neutral state
         val action = if (direction == ItemTouchHelper.RIGHT) rightAction else leftAction
-        if (action != Preferences.SWIPE_ACTION_ARCHIVE) {
-            adapter?.notifyItemChanged(viewHolder.adapterPosition)
+        if (action != Preferences.SWIPE_ACTION_ARCHIVE && action != Preferences.SWIPE_ACTION_DELETE) {
+            val position = viewHolder.adapterPosition
+            if (position != RecyclerView.NO_POSITION) {
+                adapter?.notifyItemChanged(position)
+            }
         }
     }
 
