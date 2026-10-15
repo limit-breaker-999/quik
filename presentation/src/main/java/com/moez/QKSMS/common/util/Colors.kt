@@ -78,7 +78,7 @@ class Colors @Inject constructor(
     private val randomColors: List<Int> = context.resources.obtainTypedArray(R.array.random_colors)
             .let { typedArray -> (0 until typedArray.length()).map(typedArray::getColorOrThrow) }
 
-    private val minimumContrastRatio = 2
+    private val minimumContrastRatio = 4.5
 
     // Cache these values so they don't need to be recalculated
     private val primaryTextLuminance = measureLuminance(context.getColorCompat(R.color.textPrimaryDark))

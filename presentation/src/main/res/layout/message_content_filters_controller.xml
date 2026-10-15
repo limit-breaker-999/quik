@@ -42,18 +42,17 @@
             android:text="@string/message_content_filters_empty"
             android:textColor="?android:attr/textColorTertiary" />
 
-    <ImageView
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/add"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            style="@style/Widget.Material3.FloatingActionButton.Primary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:layout_gravity="bottom|end"
             android:layout_margin="16dp"
-            android:background="@drawable/circle_ripple"
             android:contentDescription="@string/message_content_filters_add_cd"
-            android:elevation="8dp"
-            android:padding="16dp"
             android:src="@drawable/ic_add_black_24dp"
-            android:tint="@color/white"
+            app:fabSize="normal"
+            app:shapeAppearanceOverlay="@style/ShapeAppearance.M3.FAB"
             tools:backgroundTint="@color/tools_theme" />
 
 </FrameLayout>

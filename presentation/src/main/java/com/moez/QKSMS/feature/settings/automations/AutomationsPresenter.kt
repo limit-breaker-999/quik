@@ -5,6 +5,7 @@ import com.uber.autodispose.autoDisposable
 import dev.octoshrimpy.quik.common.base.QkPresenter
 import dev.octoshrimpy.quik.repository.AutomationRuleRepository
 import io.reactivex.schedulers.Schedulers
+import java.util.concurrent.TimeUnit
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -39,6 +40,7 @@ class AutomationsPresenter @Inject constructor(
             .subscribe()
 
         view.toggleRuleClicks()
+            .throttleFirst(300, TimeUnit.MILLISECONDS)
             .observeOn(Schedulers.io())
             .subscribeOn(Schedulers.io())
             .autoDisposable(view.scope())

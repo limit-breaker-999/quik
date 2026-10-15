@@ -24,6 +24,9 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.iterator
 import androidx.lifecycle.Lifecycle
 import com.google.android.material.color.DynamicColors
@@ -113,6 +116,7 @@ abstract class QkThemedActivity : QkActivity() {
 
     @SuppressLint("InlinedApi")
     override fun onCreate(savedInstanceState: Bundle?) {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setTheme(getActivityThemeRes(prefs.black.get()))
         if (shouldApplyDynamicColors(prefs.dynamicColor.get(), prefs.black.get())) {
             DynamicColors.applyIfAvailable(this)
@@ -126,11 +130,10 @@ abstract class QkThemedActivity : QkActivity() {
                 .autoDisposable(scope())
                 .subscribe { recreate() }
 
-        // We can only set light nav bar on API 27 in attrs, but we can do it in API 26 here
-        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.O) {
-            val night = !resolveThemeBoolean(R.attr.isLightTheme)
-            window.decorView.systemUiVisibility = if (night) 0 else
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        val isLightTheme = resolveThemeBoolean(R.attr.isLightTheme)
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = isLightTheme
+            isAppearanceLightNavigationBars = isLightTheme
         }
 
         // Some devices don't let you modify android.R.attr.navigationBarColor
@@ -145,8 +148,19 @@ abstract class QkThemedActivity : QkActivity() {
         setTaskDescription(taskDesc)
     }
 
+    override fun setContentView(layoutResID: Int) {
+        super.setContentView(layoutResID)
+        applySystemBarInsets()
+    }
+
+    override fun setContentView(view: View?) {
+        super.setContentView(view)
+        applySystemBarInsets()
+    }
+
     override fun onPostCreate(savedInstanceState: Bundle?) {
         super.onPostCreate(savedInstanceState)
+        applySystemBarInsets()
 
         // Set the color for the overflow and navigation icon
         val textSecondary = resolveThemeColor(android.R.attr.textColorSecondary)
@@ -185,6 +199,16 @@ abstract class QkThemedActivity : QkActivity() {
     open fun getActivityThemeRes(black: Boolean) = when {
         black -> R.style.AppTheme_Black
         else -> R.style.AppTheme
+    }
+
+    protected open fun applySystemBarInsets() {
+        val content = findViewById<View>(android.R.id.content) ?: return
+        ViewCompat.setOnApplyWindowInsetsListener(content) { v, windowInsets ->
+            val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(insets.left, insets.top, insets.right, insets.bottom)
+            windowInsets
+        }
+        ViewCompat.requestApplyInsets(content)
     }
 
 }

@@ -8,6 +8,7 @@ import dev.octoshrimpy.quik.model.AutomationRule
 import dev.octoshrimpy.quik.model.AutomationStepHelper
 import dev.octoshrimpy.quik.repository.AutomationRuleRepository
 import io.reactivex.Observable
+import java.util.concurrent.TimeUnit
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -135,6 +136,7 @@ class EditAutomationPresenter @Inject constructor(
             }
 
         view.saveClicks()
+            .throttleFirst(500, TimeUnit.MILLISECONDS)
             .withLatestFrom(state) { _, s -> s }
             .autoDisposable(view.scope())
             .subscribe { s ->
