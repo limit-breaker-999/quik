@@ -494,7 +494,7 @@ public class Transaction {
 
                 };
 
-                context.registerReceiver(receiver, filter);
+                androidx.core.content.ContextCompat.registerReceiver(context, receiver, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
             } catch (Throwable e) {
                 Timber.e(e, "exception thrown");
             }

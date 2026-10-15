@@ -19,6 +19,8 @@
 package dev.octoshrimpy.quik.worker
 
 import android.content.Context
+import android.content.pm.ServiceInfo
+import android.os.Build
 import androidx.work.ForegroundInfo
 import androidx.work.Worker
 import androidx.work.WorkerParameters
@@ -39,6 +41,7 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
     : Worker(appContext, workerParams) {
     companion object {
         const val INPUT_DATA_KEY_MESSAGE_ID = "messageId"
+        const val NOTIFICATION_ID_FOREGROUND_WORKER = 10001
     }
 
     @Inject lateinit var conversationRepo: ConversationRepository
@@ -61,7 +64,7 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
             return Result.failure(inputData)
         }
 
-        val message = messageRepo.getMessage(messageId) ?: return Result.failure(inputData)
+        val message = messageRepo.getUnmanagedMessage(messageId) ?: return Result.failure(inputData)
 
         val action = blockingClient.shouldBlock(message.address).blockingGet()
 
@@ -116,8 +119,8 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
             return Result.failure(inputData)
         }
 
-        // unarchive conversation if necessary
-        if (conversation.archived) {
+        // unarchive conversation if necessary (unless archived by automation)
+        if (conversation.archived && !automationResult.isArchived) {
             Timber.v("conversation unarchived")
             conversationRepo.markUnarchived(listOf(conversation.id))
         }
@@ -140,9 +143,17 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
         return Result.success()
     }
 
-    override fun getForegroundInfo() = ForegroundInfo(
-        0,
-        notificationManager.getForegroundNotificationForWorkersOnOlderAndroids()
-    )
+    override fun getForegroundInfo(): ForegroundInfo {
+        val notification = notificationManager.getForegroundNotificationForWorkersOnOlderAndroids()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                NOTIFICATION_ID_FOREGROUND_WORKER,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(NOTIFICATION_ID_FOREGROUND_WORKER, notification)
+        }
+    }
 
 }

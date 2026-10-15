@@ -24,4 +24,5 @@ interface AutomationRuleRepository {
      */
     fun tryAcquireReplySlot(ruleId: Long, threadId: Long, rateLimitMs: Long): Boolean
     fun incrementHitCount(id: Long)
+    fun close()
 }

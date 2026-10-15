@@ -22,7 +22,9 @@ import android.app.PendingIntent
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.Uri
+import android.os.Build
 import android.provider.Telephony
 import androidx.core.net.toUri
 import androidx.work.ForegroundInfo
@@ -68,6 +70,7 @@ import javax.inject.Inject
 class ReceiveMmsWorker(appContext: Context, workerParams: WorkerParameters)
     : Worker(appContext, workerParams) {
     companion object {
+        const val NOTIFICATION_ID_FOREGROUND_WORKER = 10001
         const val INPUT_DATA_SUBSCRIPTION_ID = "subscriptionId"
         const val INPUT_DATA_EXTRA_FILE_PATH = "filePath"
         const val INPUT_DATA_EXTRA_LOCATION_URL = "locationUrl"
@@ -117,7 +120,15 @@ class ReceiveMmsWorker(appContext: Context, workerParams: WorkerParameters)
         Timber.v(filePath)
 
         val downloadFile = File(filePath)
+        var notificationInd: NotificationInd? = null
+
         try {
+            try {
+                notificationInd = PduPersister.getPduPersister(applicationContext).load(extraUri.toUri()) as? NotificationInd
+            } catch (e: Exception) {
+                Timber.e(e, "error loading notification ind")
+            }
+
             // read file into a bytearray
             val mmsData = FileInputStream(downloadFile).use { inputStream ->
                 val fileLength = downloadFile.length().toInt()
@@ -130,10 +141,13 @@ class ReceiveMmsWorker(appContext: Context, workerParams: WorkerParameters)
             Timber.v("response buffered length: ${mmsData.size}")
 
             if (mmsData.isNotEmpty()) {
-                // build notification ind (beware this must be done prior to downloadrequest.persist)
-                val notificationInd =
-                    PduPersister.getPduPersister(applicationContext).load(extraUri.toUri())
-                            as NotificationInd
+                if (notificationInd == null) {
+                    try {
+                        notificationInd = PduPersister.getPduPersister(applicationContext).load(extraUri.toUri()) as? NotificationInd
+                    } catch (e: Exception) {
+                        Timber.e(e, "error loading notification ind")
+                    }
+                }
 
                 // persist message
                 val messageUri = DownloadRequest.persist(
@@ -215,8 +229,8 @@ class ReceiveMmsWorker(appContext: Context, workerParams: WorkerParameters)
                             return Result.success(inputData)
                         }
 
-                        // unarchive conversation if necessary
-                        if (conversation.archived) {
+                        // unarchive conversation if necessary (unless archived by automation)
+                        if (conversation.archived && !automationResult.isArchived) {
                             Timber.v("conversation unarchived")
                             conversationRepo.markUnarchived(listOf(conversation.id))
                         }
@@ -233,12 +247,6 @@ class ReceiveMmsWorker(appContext: Context, workerParams: WorkerParameters)
                         Timber.v("update badge and widget")
                         updateBadge.execute(Unit)
                     }
-
-                    // send ack to mmsc
-                    sendAcknowledgeInd(applicationContext, subscriptionId, notificationInd)
-
-                    // send notify ind to mmsc
-                    sendNotifyRespInd(applicationContext, subscriptionId, notificationInd)
                 }
             }
             else Timber.e("empty mms data")
@@ -249,7 +257,20 @@ class ReceiveMmsWorker(appContext: Context, workerParams: WorkerParameters)
         } catch (e: Exception) {
             Timber.e("mms receive worker exception: ${e.message}")
         } finally {
-            downloadFile.delete()
+            notificationInd?.let { ind ->
+                sendAcknowledgeInd(applicationContext, subscriptionId, ind)
+                sendNotifyRespInd(applicationContext, subscriptionId, ind)
+            }
+            try {
+                DownloadManager.finishDownload(locationUrl)
+            } catch (e: Exception) {
+                Timber.e(e, "error finishing download in DownloadManager")
+            }
+            try {
+                downloadFile.delete()
+            } catch (e: Exception) {
+                Timber.e(e, "error deleting download file")
+            }
         }
 
         Timber.v("finished")
@@ -360,9 +381,17 @@ class ReceiveMmsWorker(appContext: Context, workerParams: WorkerParameters)
         }
     }
 
-    override fun getForegroundInfo() = ForegroundInfo(
-        0,
-        notificationManager.getForegroundNotificationForWorkersOnOlderAndroids()
-    )
+    override fun getForegroundInfo(): ForegroundInfo {
+        val notification = notificationManager.getForegroundNotificationForWorkersOnOlderAndroids()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                NOTIFICATION_ID_FOREGROUND_WORKER,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(NOTIFICATION_ID_FOREGROUND_WORKER, notification)
+        }
+    }
 
 }

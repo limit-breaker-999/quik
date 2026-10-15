@@ -192,7 +192,7 @@ public class TransactionService extends Service implements Observer {
         mReceiver = new ConnectivityBroadcastReceiver();
         IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
-        registerReceiver(mReceiver, intentFilter);
+        androidx.core.content.ContextCompat.registerReceiver(this, mReceiver, intentFilter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
         mConnMgr = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
     }
 

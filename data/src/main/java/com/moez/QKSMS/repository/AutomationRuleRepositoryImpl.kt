@@ -4,14 +4,34 @@ import dev.octoshrimpy.quik.model.AutomationReplyState
 import dev.octoshrimpy.quik.model.AutomationRule
 import io.realm.Realm
 import io.realm.RealmResults
+import timber.log.Timber
 import javax.inject.Inject
 
 class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleRepository {
 
+    private var rulesRealm: Realm? = null
+
     override fun getRules(): RealmResults<AutomationRule> {
-        return Realm.getDefaultInstance()
+        try {
+            rulesRealm?.takeIf { !it.isClosed }?.close()
+        } catch (e: Exception) {
+            Timber.w(e, "Error closing previous rules Realm instance")
+        }
+        val realm = Realm.getDefaultInstance()
+        rulesRealm = realm
+        return realm
             .where(AutomationRule::class.java)
             .findAllAsync()
+    }
+
+    override fun close() {
+        try {
+            rulesRealm?.takeIf { !it.isClosed }?.close()
+        } catch (e: Exception) {
+            Timber.w(e, "Error closing rules Realm instance")
+        } finally {
+            rulesRealm = null
+        }
     }
 
     override fun getRule(id: Long): AutomationRule? {
@@ -27,22 +47,24 @@ class AutomationRuleRepositoryImpl @Inject constructor() : AutomationRuleReposit
 
     override fun tryAcquireReplySlot(ruleId: Long, threadId: Long, rateLimitMs: Long): Boolean {
         val now = System.currentTimeMillis()
-        Realm.getDefaultInstance().use { realm ->
-            val key = "$ruleId:$threadId"
-            val state = realm.where(AutomationReplyState::class.java)
-                .equalTo("id", key)
-                .findFirst()
+        val key = "$ruleId:$threadId"
+        return Realm.getDefaultInstance().use { realm ->
+            var acquired = false
+            realm.executeTransaction { r ->
+                val state = r.where(AutomationReplyState::class.java)
+                    .equalTo("id", key)
+                    .findFirst()
 
-            // A limit of 0 means "always reply" (matches AutomationRule semantics)
-            if (rateLimitMs > 0 && state != null && now - state.lastReplyAt < rateLimitMs) {
-                return false
+                // A limit of 0 means "always reply" (matches AutomationRule semantics)
+                if (rateLimitMs > 0 && state != null && now - state.lastReplyAt < rateLimitMs) {
+                    acquired = false
+                } else {
+                    val s = state ?: r.createObject(AutomationReplyState::class.java, key)
+                    s.lastReplyAt = now
+                    acquired = true
+                }
             }
-
-            realm.executeTransaction {
-                val s = state ?: it.createObject(AutomationReplyState::class.java, key)
-                s.lastReplyAt = now
-            }
-            return true
+            acquired
         }
     }
 

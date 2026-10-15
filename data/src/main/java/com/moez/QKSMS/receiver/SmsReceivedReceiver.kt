@@ -41,34 +41,35 @@ class SmsReceivedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         AndroidInjection.inject(this, context)
 
-        Sms.Intents.getMessagesFromIntent(intent)?.let { messages ->
-            val pendingResult = goAsync()
-            // reduce list of messages to single message and save in db
-            Single.just(messages)
-                .observeOn(Schedulers.io())
-                .map {
-                    Timber.v("onReceive() new sms")  // here so runs on io thread
+        val messages = Sms.Intents.getMessagesFromIntent(intent)
+        if (messages.isNullOrEmpty()) return
 
-                    messageRepo.insertReceivedSms(
-                        intent.extras?.getInt("subscription", -1) ?: -1,
-                        messages[0].displayOriginatingAddress,
-                        messages.mapNotNull { it.displayMessageBody }.reduce { body, new -> body + new },
-                        messages[0].timestampMillis
-                    ).id
-                }
-                .subscribe({ messageId ->
-                    WorkManager.getInstance(context).enqueue(
-                        OneTimeWorkRequestBuilder<ReceiveSmsWorker>()
-                            .setInputData(workDataOf(INPUT_DATA_KEY_MESSAGE_ID to messageId))
-                            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-                            .build()
-                    )
-                    pendingResult.finish()
-                }, { error ->
-                    Timber.e(error, "error receiving new sms")
-                    pendingResult.finish()
-                })
-        }
+        val pendingResult = goAsync()
+        // reduce list of messages to single message and save in db
+        Single.just(messages)
+            .observeOn(Schedulers.io())
+            .map {
+                Timber.v("onReceive() new sms")  // here so runs on io thread
+
+                messageRepo.insertReceivedSms(
+                    intent.extras?.getInt("subscription", -1) ?: -1,
+                    messages.firstOrNull()?.displayOriginatingAddress.orEmpty(),
+                    messages.mapNotNull { it.displayMessageBody }.joinToString(""),
+                    messages.firstOrNull()?.timestampMillis ?: System.currentTimeMillis()
+                ).id
+            }
+            .subscribe({ messageId ->
+                WorkManager.getInstance(context).enqueue(
+                    OneTimeWorkRequestBuilder<ReceiveSmsWorker>()
+                        .setInputData(workDataOf(INPUT_DATA_KEY_MESSAGE_ID to messageId))
+                        .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                        .build()
+                )
+                pendingResult.finish()
+            }, { error ->
+                Timber.e(error, "error receiving new sms")
+                pendingResult.finish()
+            })
     }
 
 }
