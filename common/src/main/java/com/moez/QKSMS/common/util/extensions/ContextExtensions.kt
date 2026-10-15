@@ -63,7 +63,13 @@ fun Context.resolveThemeColor(attributeId: Int, default: Int = 0): Int {
     val outValue = TypedValue()
     val wasResolved = theme.resolveAttribute(attributeId, outValue, true)
 
-    return if (wasResolved) getColorCompat(outValue.resourceId) else default
+    return when {
+        !wasResolved -> default
+        // Attr resolved to a color resource
+        outValue.resourceId != 0 -> getColorCompat(outValue.resourceId)
+        // Attr resolved to a literal color value (e.g. #FF0000 in a theme)
+        else -> outValue.data
+    }
 }
 
 fun Context.resolveThemeColorStateList(attributeId: Int, default: Int = 0): ColorStateList {
