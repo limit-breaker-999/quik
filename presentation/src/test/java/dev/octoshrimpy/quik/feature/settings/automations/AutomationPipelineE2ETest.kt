@@ -387,7 +387,16 @@ class AutomationPipelineE2ETest {
         assertEquals(3, fixed.size)
         assertEquals(AutomationRule.ACTION_FORWARD_SMS, fixed[0].action)
         assertEquals(AutomationRule.ACTION_ARCHIVE, fixed[1].action)
-        assertEquals(AutomationRule.ACTION_DELETE, fixed[2].action)
+        // 7. Attempting to move DELETE down is blocked
+        val attemptedMoveDeleteDown = AutomationStepHelper.moveDown(afterAdd, 2)
+        assertEquals(afterAdd, attemptedMoveDeleteDown)
+
+        // 8. addStep when DELETE is first correctly inserts before DELETE and keeps DELETE terminal
+        val deleteFirst = listOf(AutomationActionStep(action = AutomationRule.ACTION_DELETE))
+        val addWithDeleteFirst = AutomationStepHelper.addStep(deleteFirst)
+        assertEquals(2, addWithDeleteFirst.size)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, addWithDeleteFirst[0].action)
+        assertEquals(AutomationRule.ACTION_DELETE, addWithDeleteFirst[1].action)
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -426,6 +435,31 @@ class AutomationPipelineE2ETest {
             result1 is ExecuteAutomations.ExecutionResult.Dropped)
         assertEquals(listOf(101L), messageRepo.deletedMessageIds)
         assertEquals(listOf(301L), messageRepo.markedReadThreadIds)
+
+        // Rule with delayMs = 0 containing ARCHIVE: MUST return Dropped (notification & vibrate suppressed)
+        val instantArchiveRule = AutomationRule(
+            id = 3L,
+            name = "Instant OTP Suppress & Archive",
+            enabled = true,
+            matchBody = "ArchiveMe",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_ARCHIVE)
+            ))
+        }
+
+        autoRepo.rules.clear()
+        autoRepo.rules.add(instantArchiveRule)
+
+        val messageArchive = createMessage(103L, 303L, "+919876543210", "ArchiveMe: Statement ready")
+        val resultArchive = interactor.execute(messageArchive)
+
+        assertTrue("delayMs=0 with ARCHIVE must set isArchived=true to suppress notifications in NotificationManager",
+            resultArchive.isArchived)
+        assertTrue("ARCHIVE preserves conversation in database rather than dropping message object",
+            resultArchive is ExecuteAutomations.ExecutionResult.Normal)
+        assertEquals(listOf(303L), convRepo.archivedThreadIds)
 
         // Rule with delayMs = 30_000L containing DELETE: MUST return Normal so notification initially displays
         val timedDeleteRule = AutomationRule(

@@ -216,7 +216,7 @@
                     android:id="@+id/delayed"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:icon="@drawable/ic_av_timer_black_24dp"
+                    app:icon="@drawable/ic_schedule_send_24dp"
                     app:title="@string/settings_delayed_title"
                     tools:summary="No delay" />
 

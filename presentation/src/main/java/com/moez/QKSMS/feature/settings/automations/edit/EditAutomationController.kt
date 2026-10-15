@@ -46,6 +46,7 @@ class EditAutomationController(private val ruleId: Long = -1L)
     private var isRendering = false
     private var pendingContactStepIndex: Int = -1
     private var currentSteps: List<AutomationActionStep> = emptyList()
+    private var lastRenderedSteps: List<AutomationActionStep>? = null
 
     private val delaySubject: Subject<Long> = PublishSubject.create()
     private val presetSubject: Subject<Pair<String, Boolean>> = PublishSubject.create()
@@ -143,8 +144,11 @@ class EditAutomationController(private val ruleId: Long = -1L)
                 else -> ctx.getString(R.string.automation_delay_selected_custom, state.delayMs / 1000)
             }
 
-            // Render modular action steps
-            renderActionSteps(state.actionSteps)
+            // Render modular action steps only if action steps actually changed
+            if (lastRenderedSteps != state.actionSteps) {
+                renderActionSteps(state.actionSteps)
+                lastRenderedSteps = state.actionSteps
+            }
 
             // Disable + Add Action button if all 6 actions are already used
             val canAddMore = state.actionSteps.size < AutomationStepHelper.ALL_ACTIONS.size
@@ -159,117 +163,220 @@ class EditAutomationController(private val ruleId: Long = -1L)
     private fun renderActionSteps(steps: List<AutomationActionStep>) {
         val container = binding.actionStepsContainer
         val inflater = LayoutInflater.from(container.context)
-        container.removeAllViews()
 
-        val usedActions = steps.map { it.action }.toSet()
+        // Check if the current views match the steps structure
+        val needsFullRebuild = container.childCount != steps.size || (0 until container.childCount).any { i ->
+            container.getChildAt(i).tag != steps[i].action
+        }
 
-        steps.forEachIndexed { index, step ->
-            val stepBinding = ItemAutomationActionStepBinding.inflate(inflater, container, false)
-            val ctx = stepBinding.root.context
+        if (needsFullRebuild) {
+            container.removeAllViews()
 
-            // Badge
-            stepBinding.stepNumberBadge.text = ctx.getString(R.string.automation_step_title, index + 1)
+            steps.forEachIndexed { index, step ->
+                val stepBinding = ItemAutomationActionStepBinding.inflate(inflater, container, false)
+                stepBinding.root.tag = step.action
+                val ctx = stepBinding.root.context
 
-            // Title
-            val titleRes = when (step.action) {
-                AutomationRule.ACTION_FORWARD_SMS -> R.string.automation_action_forward_sms
-                AutomationRule.ACTION_FORWARD_HTTP -> R.string.automation_action_forward_http
-                AutomationRule.ACTION_AUTO_REPLY -> R.string.automation_action_auto_reply
-                AutomationRule.ACTION_MARK_READ -> R.string.automation_action_mark_read
-                AutomationRule.ACTION_ARCHIVE -> R.string.automation_action_archive
-                AutomationRule.ACTION_DELETE -> R.string.automation_action_delete
-                else -> R.string.automation_action_delete
+                // Badge
+                stepBinding.stepNumberBadge.text = ctx.getString(R.string.automation_step_title, index + 1)
+
+                // Title
+                val titleRes = when (step.action) {
+                    AutomationRule.ACTION_FORWARD_SMS -> R.string.automation_action_forward_sms
+                    AutomationRule.ACTION_FORWARD_HTTP -> R.string.automation_action_forward_http
+                    AutomationRule.ACTION_AUTO_REPLY -> R.string.automation_action_auto_reply
+                    AutomationRule.ACTION_MARK_READ -> R.string.automation_action_mark_read
+                    AutomationRule.ACTION_ARCHIVE -> R.string.automation_action_archive
+                    AutomationRule.ACTION_DELETE -> R.string.automation_action_delete
+                    else -> R.string.automation_action_delete
+                }
+                stepBinding.actionTypeSelector.text = ctx.getString(titleRes)
+
+                // Reorder & Remove buttons
+                val isDelete = step.action == AutomationRule.ACTION_DELETE
+                val isFirst = index == 0
+                val isLast = index == steps.size - 1
+                val nextIsDelete = !isLast && steps[index + 1].action == AutomationRule.ACTION_DELETE
+
+                stepBinding.btnMoveUp.isEnabled = !isFirst && !isDelete
+                stepBinding.btnMoveUp.alpha = if (!isFirst && !isDelete) 1f else 0.3f
+                stepBinding.btnMoveUp.setOnClickListener {
+                    val idx = container.indexOfChild(stepBinding.root)
+                    if (idx > 0) moveUpSubject.onNext(idx)
+                }
+
+                stepBinding.btnMoveDown.isEnabled = !isLast && !nextIsDelete && !isDelete
+                stepBinding.btnMoveDown.alpha = if (!isLast && !nextIsDelete && !isDelete) 1f else 0.3f
+                stepBinding.btnMoveDown.setOnClickListener {
+                    val idx = container.indexOfChild(stepBinding.root)
+                    if (idx in 0 until container.childCount - 1) moveDownSubject.onNext(idx)
+                }
+
+                val canRemove = steps.size > 1
+                stepBinding.btnRemoveStep.isEnabled = canRemove
+                stepBinding.btnRemoveStep.alpha = if (canRemove) 1f else 0.3f
+                stepBinding.btnRemoveStep.setOnClickListener {
+                    val idx = container.indexOfChild(stepBinding.root)
+                    if (idx in currentSteps.indices) removeStepSubject.onNext(idx)
+                }
+
+                // Action type selector dialog
+                stepBinding.actionTypeSelector.setOnClickListener {
+                    val idx = container.indexOfChild(stepBinding.root)
+                    if (idx in currentSteps.indices) {
+                        showActionTypePicker(idx, currentSteps[idx], currentSteps.map { it.action }.toSet())
+                    }
+                }
+
+                // Contextual inputs
+                stepBinding.forwardSmsContainer.isVisible = step.action == AutomationRule.ACTION_FORWARD_SMS
+                stepBinding.forwardHttpContainer.isVisible = step.action == AutomationRule.ACTION_FORWARD_HTTP
+                stepBinding.autoReplyContainer.isVisible = step.action == AutomationRule.ACTION_AUTO_REPLY
+                stepBinding.stepDescriptionText.isVisible = step.action == AutomationRule.ACTION_MARK_READ ||
+                    step.action == AutomationRule.ACTION_ARCHIVE ||
+                    step.action == AutomationRule.ACTION_DELETE
+
+                when (step.action) {
+                    AutomationRule.ACTION_FORWARD_SMS -> {
+                        if (stepBinding.forwardPhoneField.text.toString() != step.forwardToPhone) {
+                            stepBinding.forwardPhoneField.setText(step.forwardToPhone)
+                        }
+                        stepBinding.forwardPhoneField.doAfterTextChanged { s ->
+                            if (!isRendering) {
+                                val idx = container.indexOfChild(stepBinding.root)
+                                if (idx in currentSteps.indices) {
+                                    val cur = currentSteps[idx]
+                                    val newText = s?.toString().orEmpty()
+                                    if (cur.forwardToPhone != newText) {
+                                        stepUpdatedSubject.onNext(idx to cur.copy(forwardToPhone = newText))
+                                    }
+                                }
+                            }
+                        }
+                        if (stepBinding.appendSenderSwitch.isChecked != step.appendSenderToForward) {
+                            stepBinding.appendSenderSwitch.isChecked = step.appendSenderToForward
+                        }
+                        stepBinding.appendSenderSwitch.setOnCheckedChangeListener { _, isChecked ->
+                            if (!isRendering) {
+                                val idx = container.indexOfChild(stepBinding.root)
+                                if (idx in currentSteps.indices) {
+                                    val cur = currentSteps[idx]
+                                    if (cur.appendSenderToForward != isChecked) {
+                                        stepUpdatedSubject.onNext(idx to cur.copy(appendSenderToForward = isChecked))
+                                    }
+                                }
+                            }
+                        }
+                        stepBinding.btnPickContact.setOnClickListener {
+                            pendingContactStepIndex = container.indexOfChild(stepBinding.root)
+                            val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+                            startActivityForResult(intent, REQUEST_PICK_CONTACT)
+                        }
+                    }
+                    AutomationRule.ACTION_FORWARD_HTTP -> {
+                        if (stepBinding.forwardUrlField.text.toString() != step.forwardToUrl) {
+                            stepBinding.forwardUrlField.setText(step.forwardToUrl)
+                        }
+                        stepBinding.forwardUrlField.doAfterTextChanged { s ->
+                            if (!isRendering) {
+                                val idx = container.indexOfChild(stepBinding.root)
+                                if (idx in currentSteps.indices) {
+                                    val cur = currentSteps[idx]
+                                    val newText = s?.toString().orEmpty()
+                                    if (cur.forwardToUrl != newText) {
+                                        stepUpdatedSubject.onNext(idx to cur.copy(forwardToUrl = newText))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    AutomationRule.ACTION_AUTO_REPLY -> {
+                        if (stepBinding.replyTemplateField.text.toString() != step.replyTemplate) {
+                            stepBinding.replyTemplateField.setText(step.replyTemplate)
+                        }
+                        stepBinding.replyTemplateField.doAfterTextChanged { s ->
+                            if (!isRendering) {
+                                val idx = container.indexOfChild(stepBinding.root)
+                                if (idx in currentSteps.indices) {
+                                    val cur = currentSteps[idx]
+                                    val newText = s?.toString().orEmpty()
+                                    if (cur.replyTemplate != newText) {
+                                        stepUpdatedSubject.onNext(idx to cur.copy(replyTemplate = newText))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    AutomationRule.ACTION_MARK_READ -> {
+                        stepBinding.stepDescriptionText.setText(R.string.automation_action_mark_read_desc)
+                    }
+                    AutomationRule.ACTION_ARCHIVE -> {
+                        stepBinding.stepDescriptionText.setText(R.string.automation_action_archive_desc)
+                    }
+                    AutomationRule.ACTION_DELETE -> {
+                        stepBinding.stepDescriptionText.setText(R.string.automation_action_delete_desc)
+                    }
+                }
+
+                container.addView(stepBinding.root)
             }
-            stepBinding.actionTypeSelector.text = ctx.getString(titleRes)
+        } else {
+            // In-place update of existing child views without re-inflation (preserves focus and eliminates frame drops)
+            steps.forEachIndexed { index, step ->
+                val child = container.getChildAt(index)
+                val stepBinding = ItemAutomationActionStepBinding.bind(child)
+                val ctx = stepBinding.root.context
 
-            // Reorder & Remove buttons
-            val isDelete = step.action == AutomationRule.ACTION_DELETE
-            val isFirst = index == 0
-            val isLast = index == steps.size - 1
-            val nextIsDelete = !isLast && steps[index + 1].action == AutomationRule.ACTION_DELETE
+                stepBinding.stepNumberBadge.text = ctx.getString(R.string.automation_step_title, index + 1)
 
-            stepBinding.btnMoveUp.isEnabled = !isFirst && !isDelete
-            stepBinding.btnMoveUp.alpha = if (!isFirst && !isDelete) 1f else 0.3f
-            stepBinding.btnMoveUp.setOnClickListener { moveUpSubject.onNext(index) }
+                val isDelete = step.action == AutomationRule.ACTION_DELETE
+                val isFirst = index == 0
+                val isLast = index == steps.size - 1
+                val nextIsDelete = !isLast && steps[index + 1].action == AutomationRule.ACTION_DELETE
 
-            stepBinding.btnMoveDown.isEnabled = !isLast && !nextIsDelete
-            stepBinding.btnMoveDown.alpha = if (!isLast && !nextIsDelete) 1f else 0.3f
-            stepBinding.btnMoveDown.setOnClickListener { moveDownSubject.onNext(index) }
+                stepBinding.btnMoveUp.isEnabled = !isFirst && !isDelete
+                stepBinding.btnMoveUp.alpha = if (!isFirst && !isDelete) 1f else 0.3f
 
-            val canRemove = steps.size > 1
-            stepBinding.btnRemoveStep.isEnabled = canRemove
-            stepBinding.btnRemoveStep.alpha = if (canRemove) 1f else 0.3f
-            stepBinding.btnRemoveStep.setOnClickListener { removeStepSubject.onNext(index) }
+                stepBinding.btnMoveDown.isEnabled = !isLast && !nextIsDelete && !isDelete
+                stepBinding.btnMoveDown.alpha = if (!isLast && !nextIsDelete && !isDelete) 1f else 0.3f
 
-            // Action type selector dialog
-            stepBinding.actionTypeSelector.setOnClickListener {
-                showActionTypePicker(index, step, usedActions)
-            }
+                val canRemove = steps.size > 1
+                stepBinding.btnRemoveStep.isEnabled = canRemove
+                stepBinding.btnRemoveStep.alpha = if (canRemove) 1f else 0.3f
 
-            // Contextual inputs
-            stepBinding.forwardSmsContainer.isVisible = step.action == AutomationRule.ACTION_FORWARD_SMS
-            stepBinding.forwardHttpContainer.isVisible = step.action == AutomationRule.ACTION_FORWARD_HTTP
-            stepBinding.autoReplyContainer.isVisible = step.action == AutomationRule.ACTION_AUTO_REPLY
-            stepBinding.stepDescriptionText.isVisible = step.action == AutomationRule.ACTION_MARK_READ ||
-                step.action == AutomationRule.ACTION_ARCHIVE ||
-                step.action == AutomationRule.ACTION_DELETE
-
-            when (step.action) {
-                AutomationRule.ACTION_FORWARD_SMS -> {
-                    if (stepBinding.forwardPhoneField.text.toString() != step.forwardToPhone) {
-                        stepBinding.forwardPhoneField.setText(step.forwardToPhone)
-                    }
-                    stepBinding.forwardPhoneField.doAfterTextChanged { s ->
-                        if (!isRendering) {
-                            stepUpdatedSubject.onNext(index to step.copy(forwardToPhone = s?.toString().orEmpty()))
+                when (step.action) {
+                    AutomationRule.ACTION_FORWARD_SMS -> {
+                        if (stepBinding.forwardPhoneField.text.toString() != step.forwardToPhone) {
+                            val sel = stepBinding.forwardPhoneField.selectionStart
+                            stepBinding.forwardPhoneField.setText(step.forwardToPhone)
+                            if (stepBinding.forwardPhoneField.isFocused && sel in 0..step.forwardToPhone.length) {
+                                stepBinding.forwardPhoneField.setSelection(sel)
+                            }
+                        }
+                        if (stepBinding.appendSenderSwitch.isChecked != step.appendSenderToForward) {
+                            stepBinding.appendSenderSwitch.isChecked = step.appendSenderToForward
                         }
                     }
-                    if (stepBinding.appendSenderSwitch.isChecked != step.appendSenderToForward) {
-                        stepBinding.appendSenderSwitch.isChecked = step.appendSenderToForward
-                    }
-                    stepBinding.appendSenderSwitch.setOnCheckedChangeListener { _, isChecked ->
-                        if (!isRendering) {
-                            stepUpdatedSubject.onNext(index to step.copy(appendSenderToForward = isChecked))
+                    AutomationRule.ACTION_FORWARD_HTTP -> {
+                        if (stepBinding.forwardUrlField.text.toString() != step.forwardToUrl) {
+                            val sel = stepBinding.forwardUrlField.selectionStart
+                            stepBinding.forwardUrlField.setText(step.forwardToUrl)
+                            if (stepBinding.forwardUrlField.isFocused && sel in 0..step.forwardToUrl.length) {
+                                stepBinding.forwardUrlField.setSelection(sel)
+                            }
                         }
                     }
-                    stepBinding.btnPickContact.setOnClickListener {
-                        pendingContactStepIndex = index
-                        val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
-                        startActivityForResult(intent, REQUEST_PICK_CONTACT)
-                    }
-                }
-                AutomationRule.ACTION_FORWARD_HTTP -> {
-                    if (stepBinding.forwardUrlField.text.toString() != step.forwardToUrl) {
-                        stepBinding.forwardUrlField.setText(step.forwardToUrl)
-                    }
-                    stepBinding.forwardUrlField.doAfterTextChanged { s ->
-                        if (!isRendering) {
-                            stepUpdatedSubject.onNext(index to step.copy(forwardToUrl = s?.toString().orEmpty()))
+                    AutomationRule.ACTION_AUTO_REPLY -> {
+                        if (stepBinding.replyTemplateField.text.toString() != step.replyTemplate) {
+                            val sel = stepBinding.replyTemplateField.selectionStart
+                            stepBinding.replyTemplateField.setText(step.replyTemplate)
+                            if (stepBinding.replyTemplateField.isFocused && sel in 0..step.replyTemplate.length) {
+                                stepBinding.replyTemplateField.setSelection(sel)
+                            }
                         }
                     }
-                }
-                AutomationRule.ACTION_AUTO_REPLY -> {
-                    if (stepBinding.replyTemplateField.text.toString() != step.replyTemplate) {
-                        stepBinding.replyTemplateField.setText(step.replyTemplate)
-                    }
-                    stepBinding.replyTemplateField.doAfterTextChanged { s ->
-                        if (!isRendering) {
-                            stepUpdatedSubject.onNext(index to step.copy(replyTemplate = s?.toString().orEmpty()))
-                        }
-                    }
-                }
-                AutomationRule.ACTION_MARK_READ -> {
-                    stepBinding.stepDescriptionText.setText(R.string.automation_action_mark_read_desc)
-                }
-                AutomationRule.ACTION_ARCHIVE -> {
-                    stepBinding.stepDescriptionText.setText(R.string.automation_action_archive_desc)
-                }
-                AutomationRule.ACTION_DELETE -> {
-                    stepBinding.stepDescriptionText.setText(R.string.automation_action_delete_desc)
                 }
             }
-
-            container.addView(stepBinding.root)
         }
     }
 
@@ -334,6 +441,11 @@ class EditAutomationController(private val ruleId: Long = -1L)
 
     override fun close() {
         router.popCurrentController()
+    }
+
+    override fun onDestroyView(view: View) {
+        super.onDestroyView(view)
+        lastRenderedSteps = null
     }
 
     override fun nameChanges(): Observable<String> =
