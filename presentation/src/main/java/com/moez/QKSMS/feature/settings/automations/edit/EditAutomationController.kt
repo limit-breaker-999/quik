@@ -1,12 +1,15 @@
 package dev.octoshrimpy.quik.feature.settings.automations.edit
 
+import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.RadioGroup
 import androidx.core.view.isVisible
+import androidx.core.widget.doAfterTextChanged
 import com.jakewharton.rxbinding2.view.clicks
 import com.jakewharton.rxbinding2.widget.checkedChanges
 import com.jakewharton.rxbinding2.widget.textChanges
@@ -15,11 +18,15 @@ import dev.octoshrimpy.quik.common.base.QkController
 import dev.octoshrimpy.quik.common.util.Colors
 import dev.octoshrimpy.quik.common.util.extensions.resolveThemeColor
 import dev.octoshrimpy.quik.databinding.EditAutomationControllerBinding
+import dev.octoshrimpy.quik.databinding.ItemAutomationActionStepBinding
 import dev.octoshrimpy.quik.injection.appComponent
+import dev.octoshrimpy.quik.model.AutomationActionStep
 import dev.octoshrimpy.quik.model.AutomationRule
+import dev.octoshrimpy.quik.model.AutomationStepHelper
 import io.reactivex.Observable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
+import timber.log.Timber
 import javax.inject.Inject
 
 class EditAutomationController(private val ruleId: Long = -1L)
@@ -30,19 +37,27 @@ class EditAutomationController(private val ruleId: Long = -1L)
 
     companion object {
         const val KEY_RULE_ID = "ruleId"
+        private const val REQUEST_PICK_CONTACT = 2001
     }
 
     @Inject override lateinit var presenter: EditAutomationPresenter
     @Inject lateinit var colors: Colors
 
-    private val actionSubject: Subject<String> = PublishSubject.create()
+    private var isRendering = false
+    private var pendingContactStepIndex: Int = -1
+    private var currentSteps: List<AutomationActionStep> = emptyList()
+
     private val delaySubject: Subject<Long> = PublishSubject.create()
+    private val presetSubject: Subject<Pair<String, Boolean>> = PublishSubject.create()
+    private val addStepSubject: Subject<Unit> = PublishSubject.create()
+    private val removeStepSubject: Subject<Int> = PublishSubject.create()
+    private val moveUpSubject: Subject<Int> = PublishSubject.create()
+    private val moveDownSubject: Subject<Int> = PublishSubject.create()
+    private val stepUpdatedSubject: Subject<Pair<Int, AutomationActionStep>> = PublishSubject.create()
 
     init {
         appComponent.inject(this)
         retainViewMode = RetainViewMode.RETAIN_DETACH
-        // Persist the rule id so Conductor's Bundle constructor can restore it
-        // after process death / view restoration (BUG-057)
         args.putLong(KEY_RULE_ID, ruleId)
     }
 
@@ -60,89 +75,260 @@ class EditAutomationController(private val ruleId: Long = -1L)
     override fun onViewCreated() {
         super.onViewCreated()
 
-        // Use RadioGroup's listener for proper mutual-exclusion behavior
-        binding.actionGroup.setOnCheckedChangeListener { _, checkedId ->
-            val action = when (checkedId) {
-                R.id.actionDelete -> AutomationRule.ACTION_DELETE
-                R.id.actionArchive -> AutomationRule.ACTION_ARCHIVE
-                R.id.actionMarkRead -> AutomationRule.ACTION_MARK_READ
-                R.id.actionForwardSms -> AutomationRule.ACTION_FORWARD_SMS
-                R.id.actionForwardHttp -> AutomationRule.ACTION_FORWARD_HTTP
-                R.id.actionAutoReply -> AutomationRule.ACTION_AUTO_REPLY
-                else -> return@setOnCheckedChangeListener
-            }
-            actionSubject.onNext(action)
-        }
-
         binding.delayNone.setOnClickListener { delaySubject.onNext(0L) }
         binding.delay30s.setOnClickListener { delaySubject.onNext(30_000L) }
         binding.delay1m.setOnClickListener { delaySubject.onNext(60_000L) }
         binding.delay5m.setOnClickListener { delaySubject.onNext(300_000L) }
         binding.delay1h.setOnClickListener { delaySubject.onNext(3_600_000L) }
+
+        binding.addActionStepButton.setOnClickListener {
+            addStepSubject.onNext(Unit)
+        }
     }
 
     override fun render(state: EditAutomationState) {
-        if (binding.ruleName.text.toString() != state.name) binding.ruleName.setText(state.name)
-        if (binding.matchSenderField.text.toString() != state.matchSender) binding.matchSenderField.setText(state.matchSender)
-        if (binding.matchBodyField.text.toString() != state.matchBody) binding.matchBodyField.setText(state.matchBody)
-
-        binding.senderRegexSwitch.isChecked = state.matchSenderIsRegex
-        binding.senderCaseSwitch.isChecked = state.matchSenderCaseSensitive
-        binding.bodyRegexSwitch.isChecked = state.matchBodyIsRegex
-        binding.bodyCaseSwitch.isChecked = state.matchBodyCaseSensitive
-        binding.skipContactsSwitch.isChecked = state.skipContacts
-
-        // Check the correct radio button via the RadioGroup (avoids listener re-entrancy)
-        val targetId = when (state.action) {
-            AutomationRule.ACTION_DELETE       -> R.id.actionDelete
-            AutomationRule.ACTION_ARCHIVE      -> R.id.actionArchive
-            AutomationRule.ACTION_MARK_READ    -> R.id.actionMarkRead
-            AutomationRule.ACTION_FORWARD_SMS  -> R.id.actionForwardSms
-            AutomationRule.ACTION_FORWARD_HTTP -> R.id.actionForwardHttp
-            AutomationRule.ACTION_AUTO_REPLY   -> R.id.actionAutoReply
-            else -> R.id.actionDelete
-        }
-        if (binding.actionGroup.checkedRadioButtonId != targetId) {
-            binding.actionGroup.check(targetId)
-        }
-
-        // Show/hide action-specific sections
-        binding.forwardSmsSection.isVisible  = state.action == AutomationRule.ACTION_FORWARD_SMS
-        binding.forwardHttpSection.isVisible = state.action == AutomationRule.ACTION_FORWARD_HTTP
-        binding.autoReplySection.isVisible   = state.action == AutomationRule.ACTION_AUTO_REPLY
-
-        if (binding.forwardPhoneField.text.toString() != state.forwardToPhone) binding.forwardPhoneField.setText(state.forwardToPhone)
-        if (binding.forwardUrlField.text.toString() != state.forwardToUrl) binding.forwardUrlField.setText(state.forwardToUrl)
-        binding.appendSenderSwitch.isChecked = state.appendSenderToForward
-        if (binding.replyTemplateField.text.toString() != state.replyTemplate) binding.replyTemplateField.setText(state.replyTemplate)
-
-        // Visually mark the selected delay chip so the choice is visible:
-        // borderless buttons have no activated-state drawable, so tint the
-        // selected chip with the theme color (BUG-019)
-        val selectedChip = when (state.delayMs) {
-            0L -> binding.delayNone
-            30_000L -> binding.delay30s
-            60_000L -> binding.delay1m
-            300_000L -> binding.delay5m
-            3_600_000L -> binding.delay1h
-            else -> null
-        }
-        val accent = colors.theme().theme
-        listOf(binding.delayNone, binding.delay30s, binding.delay1m, binding.delay5m, binding.delay1h)
-            .forEach { chip ->
-                chip.isActivated = (chip == selectedChip)
-                chip.setTextColor(if (chip == selectedChip) accent
-                    else chip.context.resolveThemeColor(android.R.attr.textColorSecondary))
+        currentSteps = state.actionSteps
+        isRendering = true
+        try {
+            if (binding.ruleName.text.toString() != state.name) {
+                binding.ruleName.setText(state.name)
+            }
+            if (binding.matchSenderField.text.toString() != state.matchSender) {
+                binding.matchSenderField.setText(state.matchSender)
+            }
+            if (binding.matchBodyField.text.toString() != state.matchBody) {
+                binding.matchBodyField.setText(state.matchBody)
             }
 
-        val ctx = binding.root.context
-        binding.delaySummary.text = when (state.delayMs) {
-            0L -> ctx.getString(R.string.automation_delay_selected_none)
-            30_000L -> ctx.getString(R.string.automation_delay_selected_30s)
-            60_000L -> ctx.getString(R.string.automation_delay_selected_1m)
-            300_000L -> ctx.getString(R.string.automation_delay_selected_5m)
-            3_600_000L -> ctx.getString(R.string.automation_delay_selected_1h)
-            else -> ctx.getString(R.string.automation_delay_selected_custom, state.delayMs / 1000)
+            if (binding.senderRegexSwitch.isChecked != state.matchSenderIsRegex) {
+                binding.senderRegexSwitch.isChecked = state.matchSenderIsRegex
+            }
+            if (binding.senderCaseSwitch.isChecked != state.matchSenderCaseSensitive) {
+                binding.senderCaseSwitch.isChecked = state.matchSenderCaseSensitive
+            }
+            if (binding.bodyRegexSwitch.isChecked != state.matchBodyIsRegex) {
+                binding.bodyRegexSwitch.isChecked = state.matchBodyIsRegex
+            }
+            if (binding.bodyCaseSwitch.isChecked != state.matchBodyCaseSensitive) {
+                binding.bodyCaseSwitch.isChecked = state.matchBodyCaseSensitive
+            }
+            if (binding.skipContactsSwitch.isChecked != state.skipContacts) {
+                binding.skipContactsSwitch.isChecked = state.skipContacts
+            }
+
+            // Visually mark the selected delay chip
+            val selectedChip = when (state.delayMs) {
+                0L -> binding.delayNone
+                30_000L -> binding.delay30s
+                60_000L -> binding.delay1m
+                300_000L -> binding.delay5m
+                3_600_000L -> binding.delay1h
+                else -> null
+            }
+            val accent = colors.theme().theme
+            listOf(binding.delayNone, binding.delay30s, binding.delay1m, binding.delay5m, binding.delay1h)
+                .forEach { chip ->
+                    chip.isActivated = (chip == selectedChip)
+                    chip.setTextColor(if (chip == selectedChip) accent
+                        else chip.context.resolveThemeColor(android.R.attr.textColorSecondary))
+                }
+
+            val ctx = binding.root.context
+            binding.delaySummary.text = when (state.delayMs) {
+                0L -> ctx.getString(R.string.automation_delay_selected_none)
+                30_000L -> ctx.getString(R.string.automation_delay_selected_30s)
+                60_000L -> ctx.getString(R.string.automation_delay_selected_1m)
+                300_000L -> ctx.getString(R.string.automation_delay_selected_5m)
+                3_600_000L -> ctx.getString(R.string.automation_delay_selected_1h)
+                else -> ctx.getString(R.string.automation_delay_selected_custom, state.delayMs / 1000)
+            }
+
+            // Render modular action steps
+            renderActionSteps(state.actionSteps)
+
+            // Disable + Add Action button if all 6 actions are already used
+            val canAddMore = state.actionSteps.size < AutomationStepHelper.ALL_ACTIONS.size
+            binding.addActionStepButton.isEnabled = canAddMore
+            binding.addActionStepButton.alpha = if (canAddMore) 1f else 0.5f
+
+        } finally {
+            isRendering = false
+        }
+    }
+
+    private fun renderActionSteps(steps: List<AutomationActionStep>) {
+        val container = binding.actionStepsContainer
+        val inflater = LayoutInflater.from(container.context)
+        container.removeAllViews()
+
+        val usedActions = steps.map { it.action }.toSet()
+
+        steps.forEachIndexed { index, step ->
+            val stepBinding = ItemAutomationActionStepBinding.inflate(inflater, container, false)
+            val ctx = stepBinding.root.context
+
+            // Badge
+            stepBinding.stepNumberBadge.text = ctx.getString(R.string.automation_step_title, index + 1)
+
+            // Title
+            val titleRes = when (step.action) {
+                AutomationRule.ACTION_FORWARD_SMS -> R.string.automation_action_forward_sms
+                AutomationRule.ACTION_FORWARD_HTTP -> R.string.automation_action_forward_http
+                AutomationRule.ACTION_AUTO_REPLY -> R.string.automation_action_auto_reply
+                AutomationRule.ACTION_MARK_READ -> R.string.automation_action_mark_read
+                AutomationRule.ACTION_ARCHIVE -> R.string.automation_action_archive
+                AutomationRule.ACTION_DELETE -> R.string.automation_action_delete
+                else -> R.string.automation_action_delete
+            }
+            stepBinding.actionTypeSelector.text = ctx.getString(titleRes)
+
+            // Reorder & Remove buttons
+            val isDelete = step.action == AutomationRule.ACTION_DELETE
+            val isFirst = index == 0
+            val isLast = index == steps.size - 1
+            val nextIsDelete = !isLast && steps[index + 1].action == AutomationRule.ACTION_DELETE
+
+            stepBinding.btnMoveUp.isEnabled = !isFirst && !isDelete
+            stepBinding.btnMoveUp.alpha = if (!isFirst && !isDelete) 1f else 0.3f
+            stepBinding.btnMoveUp.setOnClickListener { moveUpSubject.onNext(index) }
+
+            stepBinding.btnMoveDown.isEnabled = !isLast && !nextIsDelete
+            stepBinding.btnMoveDown.alpha = if (!isLast && !nextIsDelete) 1f else 0.3f
+            stepBinding.btnMoveDown.setOnClickListener { moveDownSubject.onNext(index) }
+
+            val canRemove = steps.size > 1
+            stepBinding.btnRemoveStep.isEnabled = canRemove
+            stepBinding.btnRemoveStep.alpha = if (canRemove) 1f else 0.3f
+            stepBinding.btnRemoveStep.setOnClickListener { removeStepSubject.onNext(index) }
+
+            // Action type selector dialog
+            stepBinding.actionTypeSelector.setOnClickListener {
+                showActionTypePicker(index, step, usedActions)
+            }
+
+            // Contextual inputs
+            stepBinding.forwardSmsContainer.isVisible = step.action == AutomationRule.ACTION_FORWARD_SMS
+            stepBinding.forwardHttpContainer.isVisible = step.action == AutomationRule.ACTION_FORWARD_HTTP
+            stepBinding.autoReplyContainer.isVisible = step.action == AutomationRule.ACTION_AUTO_REPLY
+            stepBinding.stepDescriptionText.isVisible = step.action == AutomationRule.ACTION_MARK_READ ||
+                step.action == AutomationRule.ACTION_ARCHIVE ||
+                step.action == AutomationRule.ACTION_DELETE
+
+            when (step.action) {
+                AutomationRule.ACTION_FORWARD_SMS -> {
+                    if (stepBinding.forwardPhoneField.text.toString() != step.forwardToPhone) {
+                        stepBinding.forwardPhoneField.setText(step.forwardToPhone)
+                    }
+                    stepBinding.forwardPhoneField.doAfterTextChanged { s ->
+                        if (!isRendering) {
+                            stepUpdatedSubject.onNext(index to step.copy(forwardToPhone = s?.toString().orEmpty()))
+                        }
+                    }
+                    if (stepBinding.appendSenderSwitch.isChecked != step.appendSenderToForward) {
+                        stepBinding.appendSenderSwitch.isChecked = step.appendSenderToForward
+                    }
+                    stepBinding.appendSenderSwitch.setOnCheckedChangeListener { _, isChecked ->
+                        if (!isRendering) {
+                            stepUpdatedSubject.onNext(index to step.copy(appendSenderToForward = isChecked))
+                        }
+                    }
+                    stepBinding.btnPickContact.setOnClickListener {
+                        pendingContactStepIndex = index
+                        val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+                        startActivityForResult(intent, REQUEST_PICK_CONTACT)
+                    }
+                }
+                AutomationRule.ACTION_FORWARD_HTTP -> {
+                    if (stepBinding.forwardUrlField.text.toString() != step.forwardToUrl) {
+                        stepBinding.forwardUrlField.setText(step.forwardToUrl)
+                    }
+                    stepBinding.forwardUrlField.doAfterTextChanged { s ->
+                        if (!isRendering) {
+                            stepUpdatedSubject.onNext(index to step.copy(forwardToUrl = s?.toString().orEmpty()))
+                        }
+                    }
+                }
+                AutomationRule.ACTION_AUTO_REPLY -> {
+                    if (stepBinding.replyTemplateField.text.toString() != step.replyTemplate) {
+                        stepBinding.replyTemplateField.setText(step.replyTemplate)
+                    }
+                    stepBinding.replyTemplateField.doAfterTextChanged { s ->
+                        if (!isRendering) {
+                            stepUpdatedSubject.onNext(index to step.copy(replyTemplate = s?.toString().orEmpty()))
+                        }
+                    }
+                }
+                AutomationRule.ACTION_MARK_READ -> {
+                    stepBinding.stepDescriptionText.setText(R.string.automation_action_mark_read_desc)
+                }
+                AutomationRule.ACTION_ARCHIVE -> {
+                    stepBinding.stepDescriptionText.setText(R.string.automation_action_archive_desc)
+                }
+                AutomationRule.ACTION_DELETE -> {
+                    stepBinding.stepDescriptionText.setText(R.string.automation_action_delete_desc)
+                }
+            }
+
+            container.addView(stepBinding.root)
+        }
+    }
+
+    private fun showActionTypePicker(stepIndex: Int, currentStep: AutomationActionStep, usedActions: Set<String>) {
+        val act = activity ?: return
+        // Available actions: unused actions plus the current step's action
+        val available = AutomationStepHelper.ALL_ACTIONS.filter { it == currentStep.action || it !in usedActions }
+        val labels = available.map { action ->
+            when (action) {
+                AutomationRule.ACTION_FORWARD_SMS -> act.getString(R.string.automation_action_forward_sms)
+                AutomationRule.ACTION_FORWARD_HTTP -> act.getString(R.string.automation_action_forward_http)
+                AutomationRule.ACTION_AUTO_REPLY -> act.getString(R.string.automation_action_auto_reply)
+                AutomationRule.ACTION_MARK_READ -> act.getString(R.string.automation_action_mark_read)
+                AutomationRule.ACTION_ARCHIVE -> act.getString(R.string.automation_action_archive)
+                AutomationRule.ACTION_DELETE -> act.getString(R.string.automation_action_delete)
+                else -> action
+            }
+        }.toTypedArray()
+
+        AlertDialog.Builder(act)
+            .setTitle(R.string.automation_select_action_title)
+            .setItems(labels) { _, which ->
+                val selectedAction = available[which]
+                if (selectedAction != currentStep.action) {
+                    stepUpdatedSubject.onNext(stepIndex to currentStep.copy(action = selectedAction))
+                }
+            }
+            .setNegativeButton(R.string.button_cancel, null)
+            .show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_PICK_CONTACT && resultCode == Activity.RESULT_OK && data?.data != null) {
+            val contactUri = data.data ?: return
+            val act = activity ?: return
+            try {
+                act.contentResolver.query(
+                    contactUri,
+                    arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val number = cursor.getString(0).orEmpty()
+                        if (pendingContactStepIndex >= 0 && number.isNotBlank()) {
+                            // Extract numbers and + if present
+                            val cleanNumber = number.replace(Regex("[^0-9+]"), "")
+                            if (pendingContactStepIndex in currentSteps.indices) {
+                                val step = currentSteps[pendingContactStepIndex]
+                                stepUpdatedSubject.onNext(pendingContactStepIndex to step.copy(forwardToPhone = cleanNumber))
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error reading contact phone number")
+            }
         }
     }
 
@@ -150,37 +336,50 @@ class EditAutomationController(private val ruleId: Long = -1L)
         router.popCurrentController()
     }
 
-    // textChanges()/checkedChanges() are InitialValueObservables: they emit the
-    // view's current (empty/default) value on subscribe. Without skipInitialValue
-    // those 14 immediate emissions blank the loaded-rule state right after
-    // setRuleId() (BUG-058).
-    override fun nameChanges(): Observable<String> = binding.ruleName.textChanges().skipInitialValue().map { it.toString() }
-    override fun matchSenderChanges(): Observable<String> = binding.matchSenderField.textChanges().skipInitialValue().map { it.toString() }
-    override fun matchSenderRegexToggle(): Observable<Boolean> = binding.senderRegexSwitch.checkedChanges().skipInitialValue()
-    override fun matchSenderCaseSensitiveToggle(): Observable<Boolean> = binding.senderCaseSwitch.checkedChanges().skipInitialValue()
-    override fun matchBodyChanges(): Observable<String> = binding.matchBodyField.textChanges().skipInitialValue().map { it.toString() }
-    override fun matchBodyRegexToggle(): Observable<Boolean> = binding.bodyRegexSwitch.checkedChanges().skipInitialValue()
-    override fun matchBodyCaseSensitiveToggle(): Observable<Boolean> = binding.bodyCaseSwitch.checkedChanges().skipInitialValue()
-    override fun skipContactsToggle(): Observable<Boolean> = binding.skipContactsSwitch.checkedChanges().skipInitialValue()
-    override fun actionSelected(): Observable<String> = actionSubject
-    override fun forwardPhoneChanges(): Observable<String> = binding.forwardPhoneField.textChanges().skipInitialValue().map { it.toString() }
-    override fun forwardUrlChanges(): Observable<String> = binding.forwardUrlField.textChanges().skipInitialValue().map { it.toString() }
-    override fun appendSenderToggle(): Observable<Boolean> = binding.appendSenderSwitch.checkedChanges().skipInitialValue()
-    override fun replyTemplateChanges(): Observable<String> = binding.replyTemplateField.textChanges().skipInitialValue().map { it.toString() }
+    override fun nameChanges(): Observable<String> =
+        binding.ruleName.textChanges().skipInitialValue().filter { !isRendering }.map { it.toString() }
+
+    override fun matchSenderChanges(): Observable<String> =
+        binding.matchSenderField.textChanges().skipInitialValue().filter { !isRendering }.map { it.toString() }
+
+    override fun matchSenderRegexToggle(): Observable<Boolean> =
+        binding.senderRegexSwitch.checkedChanges().skipInitialValue().filter { !isRendering }
+
+    override fun matchSenderCaseSensitiveToggle(): Observable<Boolean> =
+        binding.senderCaseSwitch.checkedChanges().skipInitialValue().filter { !isRendering }
+
+    override fun matchBodyChanges(): Observable<String> =
+        binding.matchBodyField.textChanges().skipInitialValue().filter { !isRendering }.map { it.toString() }
+
+    override fun matchBodyRegexToggle(): Observable<Boolean> =
+        binding.bodyRegexSwitch.checkedChanges().skipInitialValue().filter { !isRendering }
+
+    override fun matchBodyCaseSensitiveToggle(): Observable<Boolean> =
+        binding.bodyCaseSwitch.checkedChanges().skipInitialValue().filter { !isRendering }
+
+    override fun skipContactsToggle(): Observable<Boolean> =
+        binding.skipContactsSwitch.checkedChanges().skipInitialValue().filter { !isRendering }
+
     override fun delaySelected(): Observable<Long> = delaySubject
     override fun saveClicks(): Observable<*> = binding.saveButton.clicks()
     override fun presetClicks(): Observable<*> = binding.presetsButton.clicks()
 
+    override fun presetSelected(): Observable<Pair<String, Boolean>> = presetSubject
+
+    override fun addStepClicks(): Observable<*> = addStepSubject
+    override fun removeStepClicks(): Observable<Int> = removeStepSubject
+    override fun moveStepUpClicks(): Observable<Int> = moveUpSubject
+    override fun moveStepDownClicks(): Observable<Int> = moveDownSubject
+    override fun stepUpdated(): Observable<Pair<Int, AutomationActionStep>> = stepUpdatedSubject
+
     override fun showPresets(presets: List<Pair<String, String>>) {
-        // activity is null when the controller is detached (rotation/navigation
-        // race) — guard instead of force-unwrapping (BUG-082)
         val act = activity ?: return
         val labels = presets.map { it.first }.toTypedArray()
         AlertDialog.Builder(act)
             .setTitle(R.string.automation_presets_title)
             .setItems(labels) { _, index ->
-                binding.matchBodyField.setText(presets[index].second)
-                binding.bodyRegexSwitch.isChecked = true
+                // Emit atomic preset selection to presenter; avoid direct UI mutation to eliminate toggle loops
+                presetSubject.onNext(presets[index].second to true)
             }
             .setNegativeButton(R.string.button_cancel, null)
             .show()

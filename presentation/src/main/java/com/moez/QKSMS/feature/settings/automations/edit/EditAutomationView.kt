@@ -1,7 +1,7 @@
 package dev.octoshrimpy.quik.feature.settings.automations.edit
 
 import dev.octoshrimpy.quik.common.base.QkViewContract
-import dev.octoshrimpy.quik.model.AutomationRule
+import dev.octoshrimpy.quik.model.AutomationActionStep
 import io.reactivex.Observable
 
 interface EditAutomationView : QkViewContract<EditAutomationState> {
@@ -14,16 +14,19 @@ interface EditAutomationView : QkViewContract<EditAutomationState> {
     fun matchBodyRegexToggle(): Observable<Boolean>
     fun matchBodyCaseSensitiveToggle(): Observable<Boolean>
     fun skipContactsToggle(): Observable<Boolean>
-    fun actionSelected(): Observable<String>
-    fun forwardPhoneChanges(): Observable<String>
-    fun forwardUrlChanges(): Observable<String>
-    fun appendSenderToggle(): Observable<Boolean>
-    fun replyTemplateChanges(): Observable<String>
-    fun delaySelected(): Observable<Long>
-    fun saveClicks(): Observable<*>
     fun presetClicks(): Observable<*>
+    fun presetSelected(): Observable<Pair<String, Boolean>>
+
+    fun delaySelected(): Observable<Long>
+
+    fun addStepClicks(): Observable<*>
+    fun removeStepClicks(): Observable<Int>
+    fun moveStepUpClicks(): Observable<Int>
+    fun moveStepDownClicks(): Observable<Int>
+    fun stepUpdated(): Observable<Pair<Int, AutomationActionStep>>
+
+    fun saveClicks(): Observable<*>
     fun showPresets(presets: List<Pair<String, String>>)
     fun showValidationError(error: String)
     fun close()
 }
-

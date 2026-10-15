@@ -25,6 +25,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
         const val KEY_RULE_ID = "ruleId"
         const val KEY_MESSAGE_ID = "messageId"
         const val KEY_THREAD_ID = "threadId"
+        const val KEY_ACTIONS_JSON = "actionsJson"
         const val KEY_ACTION = "action"
         const val KEY_FORWARD_PHONE = "forwardPhone"
         const val KEY_FORWARD_URL = "forwardUrl"
@@ -48,85 +49,116 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
     @Inject lateinit var notificationManager: NotificationManager
 
     override fun doWork(): Result {
-        val action = inputData.getString(KEY_ACTION) ?: return Result.failure()
+        val actionsJson = inputData.getString(KEY_ACTIONS_JSON)
+        val steps = if (!actionsJson.isNullOrBlank()) {
+            dev.octoshrimpy.quik.model.AutomationActionStepSerializer.fromJson(actionsJson)
+        } else {
+            val legacyAction = inputData.getString(KEY_ACTION) ?: return Result.failure()
+            listOf(
+                dev.octoshrimpy.quik.model.AutomationActionStep(
+                    action = legacyAction,
+                    forwardToPhone = inputData.getString(KEY_FORWARD_PHONE) ?: "",
+                    forwardToUrl = inputData.getString(KEY_FORWARD_URL) ?: "",
+                    appendSenderToForward = inputData.getBoolean(KEY_APPEND_SENDER, true),
+                    replyTemplate = inputData.getString(KEY_REPLY_TEMPLATE) ?: ""
+                )
+            )
+        }
+
+        if (steps.isEmpty()) return Result.success()
+
         val messageId = inputData.getLong(KEY_MESSAGE_ID, -1L)
         val threadId = inputData.getLong(KEY_THREAD_ID, -1L)
         val subId = inputData.getInt(KEY_SUB_ID, -1)
         val senderAddress = inputData.getString(KEY_SENDER_ADDRESS) ?: ""
         val messageBody = inputData.getString(KEY_MESSAGE_BODY) ?: ""
 
-        Timber.d("AutomationActionWorker: action=$action, messageId=$messageId")
+        Timber.d("AutomationActionWorker: processing ${steps.size} steps for messageId=$messageId")
 
         return try {
-            when (action) {
-                AutomationRule.ACTION_DELETE -> {
-                    if (messageId >= 0) messageRepo.deleteMessages(listOf(messageId))
-                    if (threadId >= 0) notificationManager.update(threadId)
-                }
-                AutomationRule.ACTION_ARCHIVE -> {
-                    if (threadId >= 0) {
-                        conversationRepo.markArchived(threadId)
-                        notificationManager.update(threadId)
-                    }
-                }
-                AutomationRule.ACTION_MARK_READ -> {
-                    if (threadId >= 0) {
-                        messageRepo.markRead(listOf(threadId))
-                        notificationManager.update(threadId)
-                    }
-                }
-                AutomationRule.ACTION_FORWARD_SMS -> {
-                    val phone = inputData.getString(KEY_FORWARD_PHONE) ?: return Result.failure()
-                    if (phone.isBlank()) return Result.failure()
-                    val appendSender = inputData.getBoolean(KEY_APPEND_SENDER, true)
-                    val body = if (appendSender) "From: $senderAddress | $messageBody" else messageBody
-                    val sent = messageRepo.sendNewMessages(subId, listOf(phone), body, emptyList(), false)
-                    if (sent.isEmpty()) {
-                        // Provider rejected the send (BUG-085): surface as retryable
-                        Timber.w("SMS forward produced no messages")
-                        return if (runAttemptCount < 3) Result.retry() else Result.failure()
-                    }
-                }
-                AutomationRule.ACTION_FORWARD_HTTP -> {
-                    val url = inputData.getString(KEY_FORWARD_URL) ?: return Result.failure()
-                    if (url.isBlank()) return Result.failure()
-                    val json = """{"from":${org.json.JSONObject.quote(senderAddress)},"body":${org.json.JSONObject.quote(messageBody)},"timestamp":${System.currentTimeMillis()}}"""
-                    val requestBody = json.toRequestBody("application/json".toMediaType())
-                    val request = Request.Builder().url(url).post(requestBody).build()
-
-                    val httpResult = try {
-                        httpClient.newCall(request).execute().use { response ->
-                            if (response.isSuccessful) null
-                            else {
-                                Timber.w("HTTP forward failed: ${response.code}")
-                                // Server rejected the payload; allow a few retries
-                                HTTP_RETRY_NEEDED
-                            }
+            for (step in steps) {
+                when (step.action) {
+                    AutomationRule.ACTION_FORWARD_SMS -> {
+                        val phone = step.forwardToPhone.ifBlank { inputData.getString(KEY_FORWARD_PHONE) ?: "" }
+                        if (phone.isBlank()) {
+                            Timber.w("Automation chain halted: empty forward phone")
+                            return Result.failure()
                         }
-                    } catch (e: java.io.IOException) {
-                        // Network failure: let WorkManager retry with backoff
-                        Timber.w(e, "HTTP forward network error")
-                        HTTP_RETRY_NEEDED
+                        val appendSender = step.appendSenderToForward
+                        val body = if (appendSender) "From: $senderAddress | $messageBody" else messageBody
+                        val sent = messageRepo.sendNewMessages(subId, listOf(phone), body, emptyList(), false)
+                        if (sent.isEmpty()) {
+                            // Provider rejected the send (BUG-085): surface as retryable and halt chain before DELETE
+                            Timber.w("SMS forward produced no messages; halting chain")
+                            return if (runAttemptCount < 3) Result.retry() else Result.failure()
+                        }
                     }
+                    AutomationRule.ACTION_FORWARD_HTTP -> {
+                        val url = step.forwardToUrl.ifBlank { inputData.getString(KEY_FORWARD_URL) ?: "" }
+                        if (url.isBlank()) {
+                            Timber.w("Automation chain halted: empty webhook URL")
+                            return Result.failure()
+                        }
+                        val json = """{"from":${org.json.JSONObject.quote(senderAddress)},"body":${org.json.JSONObject.quote(messageBody)},"timestamp":${System.currentTimeMillis()}}"""
+                        val requestBody = json.toRequestBody("application/json".toMediaType())
+                        val request = Request.Builder().url(url).post(requestBody).build()
 
-                    if (httpResult == HTTP_RETRY_NEEDED) {
-                        return if (runAttemptCount < 3) Result.retry() else Result.failure()
+                        val httpResult = try {
+                            httpClient.newCall(request).execute().use { response ->
+                                if (response.isSuccessful) null
+                                else {
+                                    Timber.w("HTTP forward failed: ${response.code}")
+                                    HTTP_RETRY_NEEDED
+                                }
+                            }
+                        } catch (e: java.io.IOException) {
+                            Timber.w(e, "HTTP forward network error")
+                            HTTP_RETRY_NEEDED
+                        }
+
+                        if (httpResult == HTTP_RETRY_NEEDED) {
+                            Timber.w("HTTP forward failed; halting chain before subsequent steps")
+                            return if (runAttemptCount < 3) Result.retry() else Result.failure()
+                        }
                     }
-                }
-                AutomationRule.ACTION_AUTO_REPLY -> {
-                    val template = inputData.getString(KEY_REPLY_TEMPLATE) ?: return Result.failure()
-                    if (template.isBlank() || senderAddress.isBlank()) return Result.failure()
-                    val body = template.replace("{sender}", senderAddress)
-                    val sent = messageRepo.sendNewMessages(subId, listOf(senderAddress), body, emptyList(), false)
-                    if (sent.isEmpty()) {
-                        Timber.w("Auto-reply produced no messages")
-                        return if (runAttemptCount < 3) Result.retry() else Result.failure()
+                    AutomationRule.ACTION_AUTO_REPLY -> {
+                        val template = step.replyTemplate.ifBlank { inputData.getString(KEY_REPLY_TEMPLATE) ?: "" }
+                        if (template.isBlank() || senderAddress.isBlank()) {
+                            Timber.w("Automation chain halted: empty auto-reply template or sender")
+                            return Result.failure()
+                        }
+                        val body = template.replace("{sender}", senderAddress)
+                        val sent = messageRepo.sendNewMessages(subId, listOf(senderAddress), body, emptyList(), false)
+                        if (sent.isEmpty()) {
+                            Timber.w("Auto-reply produced no messages; halting chain")
+                            return if (runAttemptCount < 3) Result.retry() else Result.failure()
+                        }
+                    }
+                    AutomationRule.ACTION_MARK_READ -> {
+                        if (threadId >= 0) {
+                            messageRepo.markRead(listOf(threadId))
+                            notificationManager.update(threadId)
+                        }
+                    }
+                    AutomationRule.ACTION_ARCHIVE -> {
+                        if (threadId >= 0) {
+                            conversationRepo.markArchived(threadId)
+                            notificationManager.update(threadId)
+                        }
+                    }
+                    AutomationRule.ACTION_DELETE -> {
+                        if (messageId >= 0) {
+                            messageRepo.deleteMessages(listOf(messageId))
+                        }
+                        if (threadId >= 0) {
+                            notificationManager.update(threadId)
+                        }
                     }
                 }
             }
             Result.success()
         } catch (e: Exception) {
-            Timber.e(e, "AutomationActionWorker failed")
+            Timber.e(e, "AutomationActionWorker failed; halting chain")
             Result.failure()
         }
     }

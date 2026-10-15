@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/contentView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?android:attr/windowBackground">
@@ -9,457 +12,391 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingTop="12dp"
+        android:paddingBottom="32dp">
 
-        <!-- ═══════════ RULE NAME ═══════════ -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/automation_rule_name"
-            android:textAppearance="@style/TextAppearance.AppCompat.Caption"
-            android:textColor="?android:attr/textColorSecondary"
-            android:layout_marginBottom="4dp" />
-
-        <EditText
-            android:id="@+id/ruleName"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/automation_rule_name_hint"
-            android:inputType="text"
-            android:imeOptions="actionNext"
-            android:maxLines="1"
-            android:layout_marginBottom="16dp" />
-
-        <!-- ═══════════ TRIGGER SECTION ═══════════ -->
-        <TextView
+        <!-- ═══════════ CARD 1: TRIGGER CONDITIONS ═══════════ -->
+        <dev.octoshrimpy.quik.common.widget.QkTextView
             style="@style/PreferenceCategory"
+            android:text="@string/automation_section_trigger" />
+
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/automation_section_trigger"
-            android:layout_marginBottom="12dp" />
-
-        <!-- Sender matcher -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/automation_match_sender"
-            android:textAppearance="@style/TextAppearance.AppCompat.Body1"
-            android:textColor="?android:attr/textColorPrimary"
-            android:layout_marginBottom="4dp" />
-
-        <EditText
-            android:id="@+id/matchSenderField"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/automation_match_sender_hint"
-            android:inputType="text"
-            android:imeOptions="actionNext"
-            android:maxLines="1"
-            android:layout_marginBottom="8dp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="16dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/automation_is_regex"
-                android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
-
-            <dev.octoshrimpy.quik.common.widget.QkSwitch
-                android:id="@+id/senderRegexSwitch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="24dp" />
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/automation_case_sensitive"
-                android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
-
-            <dev.octoshrimpy.quik.common.widget.QkSwitch
-                android:id="@+id/senderCaseSwitch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-
-        </LinearLayout>
-
-        <!-- Body matcher -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/automation_match_body"
-            android:textAppearance="@style/TextAppearance.AppCompat.Body1"
-            android:textColor="?android:attr/textColorPrimary"
-            android:layout_marginBottom="4dp" />
-
-        <EditText
-            android:id="@+id/matchBodyField"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/automation_match_body_hint"
-            android:inputType="text"
-            android:imeOptions="actionNext"
-            android:maxLines="1"
-            android:layout_marginBottom="8dp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="8dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/automation_is_regex"
-                android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
-
-            <dev.octoshrimpy.quik.common.widget.QkSwitch
-                android:id="@+id/bodyRegexSwitch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="24dp" />
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/automation_case_sensitive"
-                android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
-
-            <dev.octoshrimpy.quik.common.widget.QkSwitch
-                android:id="@+id/bodyCaseSwitch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-
-        </LinearLayout>
-
-        <!-- Preset regex patterns button -->
-        <Button
-            android:id="@+id/presetsButton"
-            style="@style/Widget.AppCompat.Button.Borderless"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/automation_use_preset"
-            android:layout_marginBottom="8dp" />
-
-        <!-- Skip contacts toggle -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="16dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/automation_skip_contacts"
-                android:textAppearance="@style/TextAppearance.AppCompat.Body1"
-                android:textColor="?android:attr/textColorPrimary" />
-
-            <dev.octoshrimpy.quik.common.widget.QkSwitch
-                android:id="@+id/skipContactsSwitch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-
-        </LinearLayout>
-
-        <!-- ═══════════ DIVIDER ═══════════ -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="?android:attr/listDivider"
-            android:layout_marginBottom="16dp" />
-
-        <!-- ═══════════ ACTION SECTION ═══════════ -->
-        <TextView
-            style="@style/PreferenceCategory"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/automation_section_action"
-            android:layout_marginBottom="8dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/automation_action_hint"
-            android:textAppearance="@style/TextAppearance.AppCompat.Caption"
-            android:textColor="?android:attr/textColorSecondary"
-            android:layout_marginBottom="8dp" />
-
-        <RadioGroup
-            android:id="@+id/actionGroup"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginBottom="12dp">
-
-            <RadioButton
-                android:id="@+id/actionDelete"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/automation_action_delete"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:minHeight="48dp" />
-
-            <RadioButton
-                android:id="@+id/actionArchive"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/automation_action_archive"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:minHeight="48dp" />
-
-            <RadioButton
-                android:id="@+id/actionMarkRead"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/automation_action_mark_read"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:minHeight="48dp" />
-
-            <RadioButton
-                android:id="@+id/actionForwardSms"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/automation_action_forward_sms"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:minHeight="48dp" />
-
-            <RadioButton
-                android:id="@+id/actionForwardHttp"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/automation_action_forward_http"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:minHeight="48dp" />
-
-            <RadioButton
-                android:id="@+id/actionAutoReply"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/automation_action_auto_reply"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:minHeight="48dp" />
-
-        </RadioGroup>
-
-        <!-- ── Forward SMS options (shown only when Forward SMS is selected) ── -->
-        <LinearLayout
-            android:id="@+id/forwardSmsSection"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:layout_marginBottom="12dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/automation_forward_sms_title"
-                android:textAppearance="@style/TextAppearance.AppCompat.Body1"
-                android:textColor="?android:attr/textColorPrimary"
-                android:layout_marginBottom="8dp" />
-
-            <EditText
-                android:id="@+id/forwardPhoneField"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="@string/automation_forward_phone_hint"
-                android:inputType="phone"
-                android:maxLines="1" />
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:cardBackgroundColor="?attr/cardBackground"
+            app:cardPreventCornerOverlap="false"
+            app:cardUseCompatPadding="false">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginTop="8dp">
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <!-- Rule Name Field -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/automation_rule_name"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Caption"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:layout_marginBottom="4dp" />
+
+                <EditText
+                    android:id="@+id/ruleName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/automation_rule_name_hint"
+                    android:inputType="text"
+                    android:imeOptions="actionNext"
+                    android:maxLines="1"
+                    android:layout_marginBottom="12dp" />
+
+                <!-- Divider -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="?attr/colorOutlineVariant"
+                    android:layout_marginBottom="12dp" />
+
+                <!-- Sender matcher -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/automation_match_sender"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Subhead"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textStyle="bold" />
 
                 <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/automation_append_sender"
-                    android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
-
-                <dev.octoshrimpy.quik.common.widget.QkSwitch
-                    android:id="@+id/appendSenderSwitch"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    android:text="@string/automation_match_sender_detail"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Caption"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginBottom="4dp" />
+
+                <EditText
+                    android:id="@+id/matchSenderField"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/automation_match_sender_hint"
+                    android:inputType="text"
+                    android:imeOptions="actionNext"
+                    android:maxLines="1"
+                    android:layout_marginBottom="8dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="12dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/automation_is_regex"
+                        android:textAppearance="@style/TextAppearance.AppCompat.Body2" />
+
+                    <dev.octoshrimpy.quik.common.widget.QkSwitch
+                        android:id="@+id/senderRegexSwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="24dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/automation_case_sensitive"
+                        android:textAppearance="@style/TextAppearance.AppCompat.Body2" />
+
+                    <dev.octoshrimpy.quik.common.widget.QkSwitch
+                        android:id="@+id/senderCaseSwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                </LinearLayout>
+
+                <!-- Divider -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="?attr/colorOutlineVariant"
+                    android:layout_marginBottom="12dp" />
+
+                <!-- Body matcher -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/automation_match_body"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Subhead"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/matchBodyField"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/automation_match_body_hint"
+                    android:inputType="text"
+                    android:imeOptions="actionNext"
+                    android:maxLines="1"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="8dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/automation_is_regex"
+                        android:textAppearance="@style/TextAppearance.AppCompat.Body2" />
+
+                    <dev.octoshrimpy.quik.common.widget.QkSwitch
+                        android:id="@+id/bodyRegexSwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="24dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/automation_case_sensitive"
+                        android:textAppearance="@style/TextAppearance.AppCompat.Body2" />
+
+                    <dev.octoshrimpy.quik.common.widget.QkSwitch
+                        android:id="@+id/bodyCaseSwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                </LinearLayout>
+
+                <!-- Preset regex patterns button -->
+                <Button
+                    android:id="@+id/presetsButton"
+                    style="@style/Widget.AppCompat.Button.Borderless"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/automation_use_preset"
+                    android:layout_marginBottom="12dp" />
+
+                <!-- Divider -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="?attr/colorOutlineVariant"
+                    android:layout_marginBottom="12dp" />
+
+                <!-- Skip contacts toggle -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:layout_marginEnd="8dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/automation_skip_contacts"
+                            android:textAppearance="@style/TextAppearance.AppCompat.Body1"
+                            android:textColor="?android:attr/textColorPrimary" />
+
+                    </LinearLayout>
+
+                    <dev.octoshrimpy.quik.common.widget.QkSwitch
+                        android:id="@+id/skipContactsSwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                </LinearLayout>
 
             </LinearLayout>
 
-        </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-        <!-- ── Forward HTTP options (shown only when Forward HTTP is selected) ── -->
-        <LinearLayout
-            android:id="@+id/forwardHttpSection"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:layout_marginBottom="12dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/automation_forward_http_title"
-                android:textAppearance="@style/TextAppearance.AppCompat.Body1"
-                android:textColor="?android:attr/textColorPrimary"
-                android:layout_marginBottom="8dp" />
-
-            <EditText
-                android:id="@+id/forwardUrlField"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="@string/automation_forward_url_hint"
-                android:inputType="textUri"
-                android:maxLines="1" />
-
-        </LinearLayout>
-
-        <!-- ── Auto-reply options (shown only when Auto Reply is selected) ── -->
-        <LinearLayout
-            android:id="@+id/autoReplySection"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:layout_marginBottom="12dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/automation_auto_reply_title"
-                android:textAppearance="@style/TextAppearance.AppCompat.Body1"
-                android:textColor="?android:attr/textColorPrimary"
-                android:layout_marginBottom="8dp" />
-
-            <EditText
-                android:id="@+id/replyTemplateField"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="@string/automation_reply_template_hint"
-                android:inputType="textMultiLine"
-                android:minLines="2"
-                android:gravity="top" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="@string/automation_reply_template_hint_detail"
-                android:textAppearance="@style/TextAppearance.AppCompat.Caption"
-                android:textColor="?android:attr/textColorSecondary" />
-
-        </LinearLayout>
-
-        <!-- ═══════════ DIVIDER ═══════════ -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="?android:attr/listDivider"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="16dp" />
-
-        <!-- ═══════════ DELAY SECTION ═══════════ -->
-        <TextView
+        <!-- ═══════════ CARD 2: EXECUTION TIMING & NOTIFICATION ═══════════ -->
+        <dev.octoshrimpy.quik.common.widget.QkTextView
             style="@style/PreferenceCategory"
+            android:text="@string/automation_timing_title" />
+
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/automation_section_delay"
-            android:layout_marginBottom="4dp" />
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:cardBackgroundColor="?attr/cardBackground"
+            app:cardPreventCornerOverlap="false"
+            app:cardUseCompatPadding="false">
 
-        <TextView
-            android:id="@+id/delaySummary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/automation_delay_none"
-            android:textAppearance="@style/TextAppearance.AppCompat.Caption"
-            android:textColor="?android:attr/textColorSecondary"
-            android:layout_marginBottom="8dp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
 
-        <!-- Delay buttons in a wrapping grid -->
-        <GridLayout
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/automation_timing_hint"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Caption"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/delaySummary"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/automation_delay_none"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Subhead"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <!-- Delay buttons in a wrapping grid -->
+                <GridLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:columnCount="3"
+                    android:layout_marginTop="4dp">
+
+                    <Button
+                        android:id="@+id/delayNone"
+                        style="@style/Widget.AppCompat.Button.Borderless"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:text="@string/automation_delay_none" />
+
+                    <Button
+                        android:id="@+id/delay30s"
+                        style="@style/Widget.AppCompat.Button.Borderless"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:text="@string/automation_delay_30s" />
+
+                    <Button
+                        android:id="@+id/delay1m"
+                        style="@style/Widget.AppCompat.Button.Borderless"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:text="@string/automation_delay_1m" />
+
+                    <Button
+                        android:id="@+id/delay5m"
+                        style="@style/Widget.AppCompat.Button.Borderless"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:text="@string/automation_delay_5m" />
+
+                    <Button
+                        android:id="@+id/delay1h"
+                        style="@style/Widget.AppCompat.Button.Borderless"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:text="@string/automation_delay_1h" />
+
+                </GridLayout>
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ═══════════ CARD 3: MODULAR SEQUENTIAL ACTION CHAIN ═══════════ -->
+        <dev.octoshrimpy.quik.common.widget.QkTextView
+            style="@style/PreferenceCategory"
+            android:text="@string/automation_action_sequence_title" />
+
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:columnCount="3"
-            android:layout_marginBottom="24dp">
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="20dp"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:cardBackgroundColor="?attr/cardBackground"
+            app:cardPreventCornerOverlap="false"
+            app:cardUseCompatPadding="false">
 
-            <Button
-                android:id="@+id/delayNone"
-                style="@style/Widget.AppCompat.Button.Borderless"
-                android:layout_width="0dp"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:text="@string/automation_delay_none" />
+                android:orientation="vertical"
+                android:padding="16dp">
 
-            <Button
-                android:id="@+id/delay30s"
-                style="@style/Widget.AppCompat.Button.Borderless"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:text="@string/automation_delay_30s" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/automation_action_sequence_hint"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Caption"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:layout_marginBottom="12dp" />
 
-            <Button
-                android:id="@+id/delay1m"
-                style="@style/Widget.AppCompat.Button.Borderless"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:text="@string/automation_delay_1m" />
+                <!-- Dynamic Action Step Blocks Container -->
+                <LinearLayout
+                    android:id="@+id/actionStepsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
 
-            <Button
-                android:id="@+id/delay5m"
-                style="@style/Widget.AppCompat.Button.Borderless"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:text="@string/automation_delay_5m" />
+                <!-- + Add Action Step Button -->
+                <Button
+                    android:id="@+id/addActionStepButton"
+                    style="@style/Widget.AppCompat.Button.Colored"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/automation_add_action_step"
+                    android:layout_marginTop="4dp" />
 
-            <Button
-                android:id="@+id/delay1h"
-                style="@style/Widget.AppCompat.Button.Borderless"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:text="@string/automation_delay_1h" />
+            </LinearLayout>
 
-        </GridLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-        <!-- ═══════════ SAVE ═══════════ -->
+        <!-- ═══════════ SAVE BUTTON ═══════════ -->
         <Button
             android:id="@+id/saveButton"
+            style="@style/Widget.AppCompat.Button.Colored"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/automation_save"
-            android:layout_marginBottom="16dp" />
+            android:layout_height="52dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:text="@string/automation_save" />
 
     </LinearLayout>
 

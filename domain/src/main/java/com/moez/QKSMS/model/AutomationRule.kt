@@ -21,7 +21,10 @@ open class AutomationRule(
     // Skip rule if sender is in contacts
     var skipContacts: Boolean = false,
 
-    // Action: DELETE | FORWARD_SMS | FORWARD_HTTP | ARCHIVE | MARK_READ | AUTO_REPLY
+    // Modular action chain (JSON-serialized list of AutomationActionStep)
+    var actionsJson: String = "",
+
+    // Action: DELETE | FORWARD_SMS | FORWARD_HTTP | ARCHIVE | MARK_READ | AUTO_REPLY (kept for backwards compatibility)
     var action: String = ACTION_DELETE,
 
     // For FORWARD_SMS
@@ -42,6 +45,33 @@ open class AutomationRule(
     var createdAt: Long = 0L,
     var hitCount: Long = 0L
 ) : RealmObject() {
+
+    fun getActionSteps(): List<AutomationActionStep> {
+        val parsed = AutomationActionStepSerializer.fromJson(actionsJson)
+        if (parsed.isNotEmpty()) return parsed
+        // Fallback to legacy single action
+        return listOf(
+            AutomationActionStep(
+                action = action,
+                forwardToPhone = forwardToPhone,
+                forwardToUrl = forwardToUrl,
+                appendSenderToForward = appendSenderToForward,
+                replyTemplate = replyTemplate
+            )
+        )
+    }
+
+    fun setActionSteps(steps: List<AutomationActionStep>) {
+        val enforced = AutomationStepHelper.enforceDeleteTerminal(steps)
+        actionsJson = AutomationActionStepSerializer.toJson(enforced)
+        val first = enforced.firstOrNull() ?: AutomationActionStep()
+        action = first.action
+        forwardToPhone = first.forwardToPhone
+        forwardToUrl = first.forwardToUrl
+        appendSenderToForward = first.appendSenderToForward
+        replyTemplate = first.replyTemplate
+    }
+
     companion object {
         const val ACTION_DELETE = "DELETE"
         const val ACTION_FORWARD_SMS = "FORWARD_SMS"

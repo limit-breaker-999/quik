@@ -3,8 +3,11 @@ package dev.octoshrimpy.quik.feature.settings.automations.edit
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
 import dev.octoshrimpy.quik.common.base.QkPresenter
+import dev.octoshrimpy.quik.model.AutomationActionStep
 import dev.octoshrimpy.quik.model.AutomationRule
+import dev.octoshrimpy.quik.model.AutomationStepHelper
 import dev.octoshrimpy.quik.repository.AutomationRuleRepository
+import io.reactivex.Observable
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -12,12 +15,15 @@ class EditAutomationPresenter @Inject constructor(
     private val automationRepo: AutomationRuleRepository
 ) : QkPresenter<EditAutomationView, EditAutomationState>(EditAutomationState()) {
 
+    val stateObservable: Observable<EditAutomationState> get() = state
+
     fun setRuleId(ruleId: Long) {
         if (ruleId < 0) {
-            newState { copy(ruleId = -1L, isNew = true) }
+            newState { copy(ruleId = -1L, isNew = true, actionSteps = listOf(AutomationActionStep(action = AutomationRule.ACTION_DELETE))) }
             return
         }
         val rule = automationRepo.getRule(ruleId) ?: return
+        val steps = rule.getActionSteps()
         newState {
             copy(
                 ruleId = rule.id,
@@ -30,11 +36,7 @@ class EditAutomationPresenter @Inject constructor(
                 matchBodyIsRegex = rule.matchBodyIsRegex,
                 matchBodyCaseSensitive = rule.matchBodyCaseSensitive,
                 skipContacts = rule.skipContacts,
-                action = rule.action,
-                forwardToPhone = rule.forwardToPhone,
-                forwardToUrl = rule.forwardToUrl,
-                appendSenderToForward = rule.appendSenderToForward,
-                replyTemplate = rule.replyTemplate,
+                actionSteps = if (steps.isNotEmpty()) steps else listOf(AutomationActionStep(action = AutomationRule.ACTION_DELETE)),
                 delayMs = rule.delayMs,
                 enabled = rule.enabled
             )
@@ -84,76 +86,101 @@ class EditAutomationPresenter @Inject constructor(
             .autoDisposable(view.scope())
             .subscribe { v -> newState { copy(skipContacts = v) } }
 
-        view.actionSelected()
-            .distinctUntilChanged()
+        // Atomic preset selection: updates pattern and isRegex simultaneously in one state transition
+        view.presetSelected()
             .autoDisposable(view.scope())
-            .subscribe { action -> newState { copy(action = action) } }
-
-        view.forwardPhoneChanges()
-            .distinctUntilChanged()
-            .autoDisposable(view.scope())
-            .subscribe { v -> newState { copy(forwardToPhone = v) } }
-
-        view.forwardUrlChanges()
-            .distinctUntilChanged()
-            .autoDisposable(view.scope())
-            .subscribe { v -> newState { copy(forwardToUrl = v) } }
-
-        view.appendSenderToggle()
-            .distinctUntilChanged()
-            .autoDisposable(view.scope())
-            .subscribe { v -> newState { copy(appendSenderToForward = v) } }
-
-        view.replyTemplateChanges()
-            .distinctUntilChanged()
-            .autoDisposable(view.scope())
-            .subscribe { v -> newState { copy(replyTemplate = v) } }
+            .subscribe { (pattern, isRegex) ->
+                newState { copy(matchBody = pattern, matchBodyIsRegex = isRegex) }
+            }
 
         view.delaySelected()
             .distinctUntilChanged()
             .autoDisposable(view.scope())
             .subscribe { ms -> newState { copy(delayMs = ms) } }
 
+        // Modular action step operations
+        view.addStepClicks()
+            .withLatestFrom(state) { _, s -> s }
+            .autoDisposable(view.scope())
+            .subscribe { s ->
+                newState { copy(actionSteps = AutomationStepHelper.addStep(s.actionSteps)) }
+            }
+
+        view.removeStepClicks()
+            .withLatestFrom(state) { index, s -> Pair(index, s) }
+            .autoDisposable(view.scope())
+            .subscribe { (index, s) ->
+                newState { copy(actionSteps = AutomationStepHelper.removeStep(s.actionSteps, index)) }
+            }
+
+        view.moveStepUpClicks()
+            .withLatestFrom(state) { index, s -> Pair(index, s) }
+            .autoDisposable(view.scope())
+            .subscribe { (index, s) ->
+                newState { copy(actionSteps = AutomationStepHelper.moveUp(s.actionSteps, index)) }
+            }
+
+        view.moveStepDownClicks()
+            .withLatestFrom(state) { index, s -> Pair(index, s) }
+            .autoDisposable(view.scope())
+            .subscribe { (index, s) ->
+                newState { copy(actionSteps = AutomationStepHelper.moveDown(s.actionSteps, index)) }
+            }
+
+        view.stepUpdated()
+            .withLatestFrom(state) { pair, s -> Triple(pair.first, pair.second, s) }
+            .autoDisposable(view.scope())
+            .subscribe { (index, updatedStep, s) ->
+                newState { copy(actionSteps = AutomationStepHelper.updateStep(s.actionSteps, index, updatedStep)) }
+            }
+
         view.saveClicks()
             .withLatestFrom(state) { _, s -> s }
             .autoDisposable(view.scope())
             .subscribe { s ->
-                // Validate action-specific required fields before saving so the
-                // rule doesn't fire-and-fail silently at runtime (BUG-032)
-                when (s.action) {
-                    AutomationRule.ACTION_FORWARD_HTTP -> {
-                        if (!s.forwardToUrl.startsWith("http://") && !s.forwardToUrl.startsWith("https://")) {
-                            Timber.w("Rejecting save: invalid webhook URL '${s.forwardToUrl}'")
-                            view.showValidationError(VALIDATION_URL)
-                            return@subscribe
+                // Validate all steps in the chain
+                for (step in s.actionSteps) {
+                    when (step.action) {
+                        AutomationRule.ACTION_FORWARD_HTTP -> {
+                            if (!step.forwardToUrl.startsWith("http://") && !step.forwardToUrl.startsWith("https://")) {
+                                Timber.w("Rejecting save: invalid webhook URL '${step.forwardToUrl}'")
+                                view.showValidationError(VALIDATION_URL)
+                                return@subscribe
+                            }
+                        }
+                        AutomationRule.ACTION_FORWARD_SMS -> {
+                            if (step.forwardToPhone.isBlank()) {
+                                Timber.w("Rejecting save: empty forward phone")
+                                view.showValidationError(VALIDATION_PHONE)
+                                return@subscribe
+                            }
+                        }
+                        AutomationRule.ACTION_AUTO_REPLY -> {
+                            if (step.replyTemplate.isBlank()) {
+                                Timber.w("Rejecting save: empty reply template")
+                                view.showValidationError(VALIDATION_TEMPLATE)
+                                return@subscribe
+                            }
                         }
                     }
-                    AutomationRule.ACTION_FORWARD_SMS -> {
-                        if (s.forwardToPhone.isBlank()) {
-                            Timber.w("Rejecting save: empty forward phone")
-                            view.showValidationError(VALIDATION_PHONE)
-                            return@subscribe
-                        }
-                    }
-                    AutomationRule.ACTION_AUTO_REPLY -> {
-                        if (s.replyTemplate.isBlank()) {
-                            Timber.w("Rejecting save: empty reply template")
-                            view.showValidationError(VALIDATION_TEMPLATE)
-                            return@subscribe
-                        }
-                    }
-                    else -> Unit
                 }
 
-                val fallbackName = when (s.action) {
-                    AutomationRule.ACTION_DELETE -> "Auto-delete rule"
-                    AutomationRule.ACTION_ARCHIVE -> "Auto-archive rule"
-                    AutomationRule.ACTION_MARK_READ -> "Mark read rule"
-                    AutomationRule.ACTION_FORWARD_SMS -> "Forward SMS rule"
-                    AutomationRule.ACTION_FORWARD_HTTP -> "Forward HTTP rule"
-                    AutomationRule.ACTION_AUTO_REPLY -> "Auto-reply rule"
-                    else -> "Automation rule"
+                val fallbackName = if (s.actionSteps.isNotEmpty()) {
+                    s.actionSteps.joinToString(" → ") { step ->
+                        when (step.action) {
+                            AutomationRule.ACTION_DELETE -> "Delete"
+                            AutomationRule.ACTION_ARCHIVE -> "Archive"
+                            AutomationRule.ACTION_MARK_READ -> "Mark read"
+                            AutomationRule.ACTION_FORWARD_SMS -> "Forward SMS"
+                            AutomationRule.ACTION_FORWARD_HTTP -> "Forward HTTP"
+                            AutomationRule.ACTION_AUTO_REPLY -> "Auto-reply"
+                            else -> "Action"
+                        }
+                    }
+                } else {
+                    "Automation rule"
                 }
+
                 val rule = AutomationRule(
                     id = if (s.isNew) 0L else s.ruleId,
                     name = s.name.ifBlank { fallbackName },
@@ -165,13 +192,9 @@ class EditAutomationPresenter @Inject constructor(
                     matchBodyIsRegex = s.matchBodyIsRegex,
                     matchBodyCaseSensitive = s.matchBodyCaseSensitive,
                     skipContacts = s.skipContacts,
-                    action = s.action,
-                    forwardToPhone = s.forwardToPhone,
-                    forwardToUrl = s.forwardToUrl,
-                    appendSenderToForward = s.appendSenderToForward,
-                    replyTemplate = s.replyTemplate,
                     delayMs = s.delayMs
                 )
+                rule.setActionSteps(s.actionSteps)
                 Timber.d("Saving automation rule: ${rule.name}")
                 automationRepo.saveRule(rule)
                 view.close()
@@ -181,7 +204,6 @@ class EditAutomationPresenter @Inject constructor(
             .autoDisposable(view.scope())
             .subscribe { view.showPresets(REGEX_PRESETS) }
     }
-
 
     companion object {
         // Validation error types surfaced to the view on save

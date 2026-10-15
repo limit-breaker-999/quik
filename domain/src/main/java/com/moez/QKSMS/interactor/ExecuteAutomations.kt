@@ -44,6 +44,7 @@ class ExecuteAutomations @Inject constructor(
         const val KEY_RULE_ID = "ruleId"
         const val KEY_MESSAGE_ID = "messageId"
         const val KEY_THREAD_ID = "threadId"
+        const val KEY_ACTIONS_JSON = "actionsJson"
         const val KEY_ACTION = "action"
         const val KEY_FORWARD_PHONE = "forwardPhone"
         const val KEY_FORWARD_URL = "forwardUrl"
@@ -65,6 +66,24 @@ class ExecuteAutomations @Inject constructor(
         private const val MAX_REGEX_INPUT_LENGTH = 4096
         private const val REGEX_MATCH_TIMEOUT_MS = 500L
         private const val WORKER_CLASS = "dev.octoshrimpy.quik.worker.AutomationActionWorker"
+
+        fun comparePhoneNumbers(num1: String, num2: String): Boolean {
+            try {
+                if (android.telephony.PhoneNumberUtils.compare(num1, num2)) return true
+            } catch (e: Throwable) {
+                // Fallback for JVM unit tests without android telephony mock
+            }
+            val clean1 = num1.filter { it.isDigit() }
+            val clean2 = num2.filter { it.isDigit() }
+            if (clean1.isNotEmpty() && clean2.isNotEmpty()) {
+                if (clean1 == clean2) return true
+                val minLen = minOf(clean1.length, clean2.length)
+                if (minLen >= 7) {
+                    if (clean1.takeLast(minLen) == clean2.takeLast(minLen)) return true
+                }
+            }
+            return false
+        }
 
         fun truncateUtf8(input: String, maxBytes: Int): String {
             if (maxBytes <= 0) return ""
@@ -157,9 +176,13 @@ class ExecuteAutomations @Inject constructor(
             try {
                 if (!matches(rule, snap, isContact)) continue
 
+                val steps = rule.getActionSteps()
+                if (steps.isEmpty()) continue
+
                 // Enforce per-thread auto-reply rate limit before counting a hit:
                 // prevents automated reply loops between two machines.
-                if (rule.action == AutomationRule.ACTION_AUTO_REPLY &&
+                val hasAutoReply = steps.any { it.action == AutomationRule.ACTION_AUTO_REPLY }
+                if (hasAutoReply &&
                     !automationRepo.tryAcquireReplySlot(rule.id, snap.threadId, rule.replyRateLimitMs)) {
                     Timber.d("AutomationRule '${rule.name}' rate-limited for thread ${snap.threadId}")
                     continue
@@ -170,30 +193,45 @@ class ExecuteAutomations @Inject constructor(
                 Timber.d("AutomationRule '${rule.name}' matched message from ${snap.address}")
                 automationRepo.incrementHitCount(rule.id)
 
-                if (rule.action == AutomationRule.ACTION_ARCHIVE) {
+                val hasDelete = steps.any { it.action == AutomationRule.ACTION_DELETE }
+                val hasArchive = steps.any { it.action == AutomationRule.ACTION_ARCHIVE }
+                val hasAsync = steps.any {
+                    it.action == AutomationRule.ACTION_FORWARD_SMS ||
+                    it.action == AutomationRule.ACTION_FORWARD_HTTP ||
+                    it.action == AutomationRule.ACTION_AUTO_REPLY
+                }
+
+                if (hasArchive) {
                     isArchived = true
                 }
 
                 if (rule.delayMs == 0L) {
-                    when (rule.action) {
-                        AutomationRule.ACTION_DELETE -> {
-                            // Delete immediately but keep evaluating remaining rules:
-                            // e.g. a forward rule after a delete rule must still fire.
-                            // Everything needed was captured in the snapshot.
-                            messageRepo.deleteMessages(listOf(snap.id))
-                            isDropped = true
+                    // Instant suppression: if delete is in sequence with 0 delay, drop message & notification
+                    if (hasDelete) {
+                        isDropped = true
+                    }
+
+                    if (!hasAsync) {
+                        // Execute local database operations in sequence immediately
+                        for (step in steps) {
+                            when (step.action) {
+                                AutomationRule.ACTION_MARK_READ -> {
+                                    messageRepo.markRead(listOf(snap.threadId))
+                                }
+                                AutomationRule.ACTION_ARCHIVE -> {
+                                    conversationRepo.markArchived(snap.threadId)
+                                }
+                                AutomationRule.ACTION_DELETE -> {
+                                    messageRepo.deleteMessages(listOf(snap.id))
+                                }
+                            }
                         }
-                        AutomationRule.ACTION_ARCHIVE -> {
-                            conversationRepo.markArchived(snap.threadId)
-                        }
-                        AutomationRule.ACTION_MARK_READ -> {
-                            messageRepo.markRead(listOf(snap.threadId))
-                        }
-                        else -> {
-                            scheduleAction(rule, snap)
-                        }
+                    } else {
+                        // Contains async actions: schedule worker to execute the sequence
+                        scheduleAction(rule, snap)
                     }
                 } else {
+                    // Timed delay: action sequence scheduled with delay; notification is not dropped initially
                     scheduleAction(rule, snap)
                 }
             } catch (e: Exception) {
@@ -212,8 +250,9 @@ class ExecuteAutomations @Inject constructor(
             rule.matchSenderIsRegex -> safeRegexMatch(
                 rule.matchSender, rule.matchSenderCaseSensitive, snap.address
             )
-            rule.matchSenderCaseSensitive -> snap.address.contains(rule.matchSender)
-            else -> snap.address.contains(rule.matchSender, ignoreCase = true)
+            rule.matchSenderCaseSensitive && snap.address.contains(rule.matchSender) -> true
+            !rule.matchSenderCaseSensitive && snap.address.contains(rule.matchSender, ignoreCase = true) -> true
+            else -> comparePhoneNumbers(rule.matchSender, snap.address)
         }
         if (!senderMatches) return false
 
@@ -230,15 +269,20 @@ class ExecuteAutomations @Inject constructor(
 
     @Suppress("UNCHECKED_CAST")
     private fun scheduleAction(rule: AutomationRule, snap: Snapshot) {
+        val steps = rule.getActionSteps()
+        val actionsJson = dev.octoshrimpy.quik.model.AutomationActionStepSerializer.toJson(steps)
+        val firstStep = steps.firstOrNull() ?: dev.octoshrimpy.quik.model.AutomationActionStep()
+
         val data = Data.Builder()
             .putLong(KEY_RULE_ID, rule.id)
             .putLong(KEY_MESSAGE_ID, snap.id)
             .putLong(KEY_THREAD_ID, snap.threadId)
-            .putString(KEY_ACTION, rule.action)
-            .putString(KEY_FORWARD_PHONE, rule.forwardToPhone)
-            .putString(KEY_FORWARD_URL, rule.forwardToUrl)
-            .putBoolean(KEY_APPEND_SENDER, rule.appendSenderToForward)
-            .putString(KEY_REPLY_TEMPLATE, rule.replyTemplate)
+            .putString(KEY_ACTIONS_JSON, actionsJson)
+            .putString(KEY_ACTION, firstStep.action)
+            .putString(KEY_FORWARD_PHONE, firstStep.forwardToPhone)
+            .putString(KEY_FORWARD_URL, firstStep.forwardToUrl)
+            .putBoolean(KEY_APPEND_SENDER, firstStep.appendSenderToForward)
+            .putString(KEY_REPLY_TEMPLATE, firstStep.replyTemplate)
             .putString(KEY_SENDER_ADDRESS, snap.address)
             .putInt(KEY_SUB_ID, snap.subId)
             // WorkManager Data is limited to 10KB; cap the body to keep the
