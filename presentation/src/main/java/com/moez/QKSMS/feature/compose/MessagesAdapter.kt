@@ -39,7 +39,6 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.net.toUri
-import com.jakewharton.rxbinding2.view.clicks
 import com.moez.QKSMS.common.QkMediaPlayer
 import dev.octoshrimpy.quik.R
 import dev.octoshrimpy.quik.common.base.QkRealmAdapter
@@ -271,12 +270,13 @@ class MessagesAdapter @Inject constructor(
             // bind the resend icon view
             if (message.isFailedMessage()) {
                 binding.resendIcon.visibility = View.VISIBLE
-                binding.resendIcon.clicks().subscribe {
+                binding.resendIcon.setOnClickListener {
                     resendClicks.onNext(message.id)
                     binding.resendIcon.visibility = View.GONE
                 }
             } else {
                 binding.resendIcon.visibility = View.GONE
+                binding.resendIcon.setOnClickListener(null)
             }
 
             val actx = holder.itemView.context
@@ -467,11 +467,14 @@ class MessagesAdapter @Inject constructor(
         }
 
         // Bind the parts
-        parts.adapter = partsAdapterProvider.get().apply {
+        val partsAdapter = (parts.adapter as? PartsAdapter) ?: partsAdapterProvider.get().also { newAdapter ->
+            parts.adapter = newAdapter
+            newAdapter.clicks.subscribe(partClicks)
+        }
+        partsAdapter.apply {
             this.theme = theme
             setData(message, previous, next, holder, audioState)
             contextMenuValue = message.id
-            clicks.subscribe(partClicks)    // part clicks gets passed back to compose view model
         }
 
         showEmojiReactions(reactions, reactionText, message)

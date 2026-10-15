@@ -30,6 +30,16 @@ import dev.octoshrimpy.quik.common.util.extensions.dpToPx
 
 class QkChangeHandler : AnimatorChangeHandler(250, true) {
 
+    companion object {
+        fun calculateEffectiveWidth(viewWidth: Int, containerWidth: Int, displayWidthPixels: Int): Float {
+            return when {
+                viewWidth > 0 -> viewWidth.toFloat()
+                containerWidth > 0 -> containerWidth.toFloat()
+                else -> displayWidthPixels.toFloat()
+            }
+        }
+    }
+
     override fun getAnimator(
         container: ViewGroup,
         from: View?,
@@ -40,23 +50,30 @@ class QkChangeHandler : AnimatorChangeHandler(250, true) {
         val animatorSet = AnimatorSet()
         animatorSet.interpolator = DecelerateInterpolator()
 
+        val displayWidth = container.resources.displayMetrics.widthPixels
+        val containerWidth = container.width
+
         if (isPush) {
             if (from != null) {
-                animatorSet.play(ObjectAnimator.ofFloat(from, View.TRANSLATION_X, -from.width.toFloat() / 4))
+                val fromWidth = calculateEffectiveWidth(from.width, containerWidth, displayWidth)
+                animatorSet.play(ObjectAnimator.ofFloat(from, View.TRANSLATION_X, -fromWidth / 4))
             }
             if (to != null) {
                 to.translationZ = 8.dpToPx(to.context).toFloat()
-                animatorSet.play(ObjectAnimator.ofFloat(to, View.TRANSLATION_X, to.width.toFloat(), 0f))
+                val toWidth = calculateEffectiveWidth(to.width, containerWidth, displayWidth)
+                animatorSet.play(ObjectAnimator.ofFloat(to, View.TRANSLATION_X, toWidth, 0f))
             }
         } else {
             if (from != null) {
                 from.translationZ = 8.dpToPx(from.context).toFloat()
-                animatorSet.play(ObjectAnimator.ofFloat(from, View.TRANSLATION_X, from.width.toFloat()))
+                val fromWidth = calculateEffectiveWidth(from.width, containerWidth, displayWidth)
+                animatorSet.play(ObjectAnimator.ofFloat(from, View.TRANSLATION_X, fromWidth))
             }
             if (to != null) {
                 // Allow this to have a nice transition when coming off an aborted push animation
                 val fromLeft = from?.translationX ?: 0f
-                animatorSet.play(ObjectAnimator.ofFloat(to, View.TRANSLATION_X, fromLeft - to.width / 4, 0f))
+                val toWidth = calculateEffectiveWidth(to.width, containerWidth, displayWidth)
+                animatorSet.play(ObjectAnimator.ofFloat(to, View.TRANSLATION_X, fromLeft - toWidth / 4, 0f))
             }
         }
 

@@ -110,6 +110,7 @@ class AvatarView @JvmOverloads constructor(
                     .circleCrop()
                     .into(layout.photo)
         } else {
+            GlideApp.with(layout.photo).clear(layout.photo)
             layout.photo.visibility = GONE
         }
     }

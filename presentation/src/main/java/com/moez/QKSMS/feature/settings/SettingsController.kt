@@ -31,8 +31,6 @@ import com.bluelinelabs.conductor.RouterTransaction
 import com.google.android.material.snackbar.Snackbar
 import com.jakewharton.rxbinding2.view.clicks
 import com.jakewharton.rxbinding2.view.longClicks
-import com.uber.autodispose.android.lifecycle.scope
-import com.uber.autodispose.autoDisposable
 import dev.octoshrimpy.quik.BuildConfig
 import dev.octoshrimpy.quik.R
 import dev.octoshrimpy.quik.common.MenuItem
@@ -73,14 +71,6 @@ class SettingsController : QkController<SettingsControllerBinding, SettingsView,
 
     @Inject override lateinit var presenter: SettingsPresenter
 
-    private val signatureDialog: TextInputDialog by lazy {
-        TextInputDialog(
-            activity ?: throw IllegalStateException("SettingsController not attached"),
-            context.getString(R.string.settings_signature_title),
-            signatureSubject::onNext
-        )
-    }
-
     private val viewQksmsPlusSubject: Subject<Unit> = PublishSubject.create()
     private val startTimeSelectedSubject: Subject<Pair<Int, Int>> = PublishSubject.create()
     private val endTimeSelectedSubject: Subject<Pair<Int, Int>> = PublishSubject.create()
@@ -91,10 +81,6 @@ class SettingsController : QkController<SettingsControllerBinding, SettingsView,
     init {
         appComponent.inject(this)
         retainViewMode = RetainViewMode.RETAIN_DETACH
-
-        colors.themeObservable()
-                .autoDisposable(scope())
-                .subscribe { activity?.recreate() }
     }
 
     override fun onViewCreated() {
@@ -230,29 +216,53 @@ class SettingsController : QkController<SettingsControllerBinding, SettingsView,
     }
 
     // TODO change this to a PopupWindow
-    override fun showNightModeDialog() = nightModeDialog.show(activity!!)
+    override fun showNightModeDialog() {
+        val act = activity ?: return
+        nightModeDialog.show(act)
+    }
 
     override fun showStartTimePicker(hour: Int, minute: Int) {
-        TimePickerDialog(activity, { _, newHour, newMinute ->
+        val act = activity ?: return
+        TimePickerDialog(act, { _, newHour, newMinute ->
             startTimeSelectedSubject.onNext(Pair(newHour, newMinute))
-        }, hour, minute, DateFormat.is24HourFormat(activity)).show()
+        }, hour, minute, DateFormat.is24HourFormat(act)).show()
     }
 
     override fun showEndTimePicker(hour: Int, minute: Int) {
-        TimePickerDialog(activity, { _, newHour, newMinute ->
+        val act = activity ?: return
+        TimePickerDialog(act, { _, newHour, newMinute ->
             endTimeSelectedSubject.onNext(Pair(newHour, newMinute))
-        }, hour, minute, DateFormat.is24HourFormat(activity)).show()
+        }, hour, minute, DateFormat.is24HourFormat(act)).show()
     }
 
-    override fun showTextSizePicker() = textSizeDialog.show(activity!!)
+    override fun showTextSizePicker() {
+        val act = activity ?: return
+        textSizeDialog.show(act)
+    }
 
-    override fun showDelayDurationDialog() = sendDelayDialog.show(activity!!)
+    override fun showDelayDurationDialog() {
+        val act = activity ?: return
+        sendDelayDialog.show(act)
+    }
 
-    override fun showSignatureDialog(signature: String) = signatureDialog.setText(signature).show()
+    override fun showSignatureDialog(signature: String) {
+        val act = activity ?: return
+        TextInputDialog(
+            act,
+            context.getString(R.string.settings_signature_title),
+            signatureSubject::onNext
+        ).setText(signature).show()
+    }
 
-    override fun showMmsSizePicker() = mmsSizeDialog.show(activity!!)
+    override fun showMmsSizePicker() {
+        val act = activity ?: return
+        mmsSizeDialog.show(act)
+    }
 
-    override fun showMessageLinkHandlingDialogPicker() = messageLinkHandlingDialog.show(activity!!)
+    override fun showMessageLinkHandlingDialogPicker() {
+        val act = activity ?: return
+        messageLinkHandlingDialog.show(act)
+    }
 
     override fun showSwipeActions() {
         router.pushController(RouterTransaction.with(SwipeActionsController())
