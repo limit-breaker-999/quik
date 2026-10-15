@@ -19,8 +19,11 @@ object AutomationStepHelper {
         val nextAction = available.first()
         val newStep = AutomationActionStep(action = nextAction)
 
-        return if (current.isNotEmpty() && current.last().action == AutomationRule.ACTION_DELETE) {
-            current.dropLast(1) + newStep + current.last()
+        val deleteIndex = current.indexOfFirst { it.action == AutomationRule.ACTION_DELETE }
+        return if (deleteIndex != -1) {
+            val mutable = current.toMutableList()
+            mutable.add(deleteIndex, newStep)
+            enforceDeleteTerminal(mutable)
         } else {
             current + newStep
         }
@@ -44,6 +47,8 @@ object AutomationStepHelper {
 
     fun moveDown(current: List<AutomationActionStep>, index: Int): List<AutomationActionStep> {
         if (index < 0 || index >= current.size - 1) return current
+        // DELETE cannot move down
+        if (current[index].action == AutomationRule.ACTION_DELETE) return current
         // Cannot move down past DELETE
         if (current[index + 1].action == AutomationRule.ACTION_DELETE) return current
         val mutable = current.toMutableList()
