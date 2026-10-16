@@ -31,15 +31,42 @@ android {
         versionCode 2241
         versionName '4.4.0'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables.useSupportLibrary = true
     }
+
+    def keystorePropertiesFile = rootProject.file("keystore.properties")
+    if (!keystorePropertiesFile.canRead()) {
+        keystorePropertiesFile = file("keystore.properties")
+    }
+    def keystoreProperties = new Properties()
+    if (keystorePropertiesFile.canRead()) {
+        keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+    }
+
+    def releaseKeystorePath = keystoreProperties.getProperty('RELEASE_KEYSTORE_PATH') ?: keystoreProperties.getProperty('storeFile') ?: System.getenv('RELEASE_KEYSTORE_PATH') ?: 'presentation/my-release-key.keystore'
+    def releaseKeystoreFile = rootProject.file(releaseKeystorePath)
+    if (!releaseKeystoreFile.exists()) {
+        releaseKeystoreFile = file(releaseKeystorePath)
+    }
+    if (!releaseKeystoreFile.exists()) {
+        releaseKeystoreFile = file('./my-release-key.keystore')
+    }
+
+    def releaseStorePassword = keystoreProperties.getProperty('RELEASE_KEYSTORE_PASSWORD') ?: keystoreProperties.getProperty('storePassword') ?: System.getenv('RELEASE_KEYSTORE_PASSWORD') ?: System.getenv('keystore_password')
+    def releaseKeyAlias = keystoreProperties.getProperty('RELEASE_KEY_ALIAS') ?: keystoreProperties.getProperty('keyAlias') ?: System.getenv('RELEASE_KEY_ALIAS') ?: System.getenv('key_alias')
+    def releaseKeyPassword = keystoreProperties.getProperty('RELEASE_KEY_PASSWORD') ?: keystoreProperties.getProperty('keyPassword') ?: System.getenv('RELEASE_KEY_PASSWORD') ?: System.getenv('key_password')
+
+    def hasReleaseKeystore = releaseKeystoreFile.exists() && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
 
     signingConfigs {
         debug // Uses the default debug keystore.
         release {
-            storeFile file('./my-release-key.keystore')
-            keyAlias 'quik_release'
-            storePassword 'quikrelease123'
-            keyPassword 'quikrelease123'
+            if (hasReleaseKeystore) {
+                storeFile releaseKeystoreFile
+                keyAlias releaseKeyAlias
+                storePassword releaseStorePassword
+                keyPassword releaseKeyPassword
+            }
             v1SigningEnabled true
             v2SigningEnabled true
             enableV3Signing true
@@ -59,7 +86,7 @@ android {
             minifyEnabled false
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
         }
 
         debug {
@@ -73,7 +100,7 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
             matchingFallbacks = ['release']
             applicationIdSuffix ".fdroid"
         }
@@ -95,11 +122,6 @@ android {
     buildFeatures {
         buildConfig true
         viewBinding true
-    }
-    if (System.getenv("CI") == "true") {
-        signingConfigs.release.storePassword = System.getenv("keystore_password")
-        signingConfigs.release.keyAlias = System.getenv("key_alias")
-        signingConfigs.release.keyPassword = System.getenv("key_password")
     }
 }
 

@@ -44,37 +44,50 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
             .build()
 
         // Internal execution ledger tracking completed step indices for worker executions across retries
-        val completedStepsLedger = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap.KeySetView<Int, Boolean>>()
+        val completedStepsLedger = java.util.concurrent.ConcurrentHashMap<String, MutableSet<Int>>()
+
+        private fun getOrCreateStepSet(workId: String): MutableSet<Int> {
+            val existing = completedStepsLedger[workId]
+            if (existing != null) {
+                return existing
+            }
+            val newSet = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
+            return completedStepsLedger.putIfAbsent(workId, newSet) ?: newSet
+        }
 
         fun markStepCompleted(workId: String, stepIndex: Int, context: Context? = null) {
-            completedStepsLedger.computeIfAbsent(workId) {
-                java.util.concurrent.ConcurrentHashMap.newKeySet()
-            }.add(stepIndex)
-            try {
-                context?.getSharedPreferences("automation_worker_ledger", Context.MODE_PRIVATE)
-                    ?.let { prefs ->
-                        val current = prefs.getStringSet("ledger_$workId", null)?.toMutableSet() ?: mutableSetOf()
-                        current.add(stepIndex.toString())
-                        prefs.edit().putStringSet("ledger_$workId", current).commit()
-                    }
-            } catch (e: Exception) {
-                // Ignore SharedPreferences failure (e.g. dummy Context in unit tests)
+            val set = getOrCreateStepSet(workId)
+            synchronized(set) {
+                set.add(stepIndex)
+                try {
+                    context?.getSharedPreferences("automation_worker_ledger", Context.MODE_PRIVATE)
+                        ?.let { prefs ->
+                            val current = prefs.getStringSet("ledger_$workId", null)?.toMutableSet() ?: mutableSetOf()
+                            current.add(stepIndex.toString())
+                            prefs.edit().putStringSet("ledger_$workId", current).commit()
+                        }
+                } catch (e: Exception) {
+                    // Ignore SharedPreferences failure (e.g. dummy Context in unit tests)
+                }
             }
         }
 
         fun getCompletedSteps(workId: String, context: Context? = null): Set<Int> {
             val inMemory = completedStepsLedger[workId]
             if (inMemory != null && inMemory.isNotEmpty()) {
-                return inMemory
+                synchronized(inMemory) {
+                    return inMemory.toSet()
+                }
             }
             return try {
                 val prefs = context?.getSharedPreferences("automation_worker_ledger", Context.MODE_PRIVATE)
                 val saved = prefs?.getStringSet("ledger_$workId", null)
                 val parsed = saved?.mapNotNull { it.toIntOrNull() }?.toSet() ?: emptySet()
                 if (parsed.isNotEmpty()) {
-                    completedStepsLedger.computeIfAbsent(workId) {
-                        java.util.concurrent.ConcurrentHashMap.newKeySet()
-                    }.addAll(parsed)
+                    val set = getOrCreateStepSet(workId)
+                    synchronized(set) {
+                        set.addAll(parsed)
+                    }
                 }
                 parsed
             } catch (e: Exception) {
@@ -84,7 +97,12 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
 
         fun clearLedger(workId: String? = null, context: Context? = null) {
             if (workId != null) {
-                completedStepsLedger.remove(workId)
+                val set = completedStepsLedger.remove(workId)
+                if (set != null) {
+                    synchronized(set) {
+                        set.clear()
+                    }
+                }
                 try {
                     context?.getSharedPreferences("automation_worker_ledger", Context.MODE_PRIVATE)
                         ?.edit()?.remove("ledger_$workId")?.commit()
