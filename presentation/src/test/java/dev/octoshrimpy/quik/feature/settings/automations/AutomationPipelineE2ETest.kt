@@ -44,17 +44,27 @@ class AutomationPipelineE2ETest {
         val rules = mutableListOf<AutomationRule>()
         val hitCounts = mutableMapOf<Long, Long>()
         var saveCount: Int = 0
+        var throwOnSave: Boolean = false
+        var throwOnDelete: Boolean = false
 
         @Suppress("UNCHECKED_CAST")
         override fun getRules(): RealmResults<AutomationRule> =
             Mockito.mock(RealmResults::class.java) as RealmResults<AutomationRule>
         override fun getRule(id: Long): AutomationRule? = rules.find { it.id == id }
         override fun saveRule(rule: AutomationRule) {
+            if (throwOnSave) {
+                throw RuntimeException("Simulated Realm write failure")
+            }
             saveCount++
             rules.removeAll { it.id == rule.id && rule.id != 0L }
             rules.add(rule)
         }
-        override fun deleteRule(id: Long) { rules.removeAll { it.id == id } }
+        override fun deleteRule(id: Long) {
+            if (throwOnDelete) {
+                throw RuntimeException("Simulated Realm delete failure")
+            }
+            rules.removeAll { it.id == id }
+        }
         override fun getEnabledRules(): List<AutomationRule> = rules.filter { it.enabled }
         override fun tryAcquireReplySlot(ruleId: Long, threadId: Long, rateLimitMs: Long): Boolean = true
         override fun incrementHitCount(id: Long) {
@@ -112,7 +122,12 @@ class AutomationPipelineE2ETest {
         override fun markFailed(messageId: Long, resultCode: Int) = false
         override fun markDelivered(messageId: Long) {}
         override fun markDeliveryFailed(messageId: Long, resultCode: Int) {}
-        override fun sendNewMessages(subId: Int, toAddresses: Collection<String>, body: String, attachments: Collection<dev.octoshrimpy.quik.model.Attachment>, sendAsGroup: Boolean, delayMs: Int) = emptyList<Message>()
+        val sentMessages = mutableListOf<Triple<Collection<String>, String, Int>>()
+
+        override fun sendNewMessages(subId: Int, toAddresses: Collection<String>, body: String, attachments: Collection<dev.octoshrimpy.quik.model.Attachment>, sendAsGroup: Boolean, delayMs: Int): Collection<Message> {
+            sentMessages.add(Triple(toAddresses, body, subId))
+            return listOf(Message().apply { this.id = 1234L; this.body = body })
+        }
         override fun sendMessage(message: Message) = emptyList<Message>()
         override fun sendMessage(messageId: Long) = emptyList<Message>()
         override fun cancelDelayedSmsAlarm(messageId: Long) {}
@@ -858,4 +873,584 @@ class AutomationPipelineE2ETest {
         assertEquals("throttleFirst(300ms) must allow only 1 toggle event from rapid double-click",
             1, autoRepo.saveCount)
     }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 10. Blank Sender + Custom Bank Alert Regex + Forward & Delete End-to-End
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testSaveRuleWithBlankSenderAndCustomBankAlertRegexAndForwardThenDelete_successAndClosesOnMainThread() {
+        val repo = FakeAutomationRuleRepo()
+        val presenter = EditAutomationPresenter(repo)
+        val view = TestEditAutomationView()
+
+        presenter.setRuleId(-1L)
+        presenter.bindIntents(view)
+
+        // User sets custom bank alert regex in body with blank sender
+        val customBankRegex = "(?i)\\b(debited|credited|balance|INR|transaction|account|spent)\\b"
+        view.matchSenderSubject.onNext("")
+        view.matchBodySubject.onNext(customBankRegex)
+        view.matchBodyRegexSubject.onNext(true)
+        view.delaySubject.onNext(0L)
+
+        // Add Forward SMS step before Delete: [FORWARD_SMS, DELETE]
+        view.addStepSubject.onNext(Unit)
+        view.stepUpdatedSubject.onNext(0 to AutomationActionStep(
+            action = AutomationRule.ACTION_FORWARD_SMS,
+            forwardToPhone = "+919876543210",
+            appendSenderToForward = true
+        ))
+
+        // Save rule
+        view.saveClicksSubject.onNext(Unit)
+
+        // Verify rule is saved to repo and view is closed cleanly
+        assertEquals(1, repo.saveCount)
+        assertTrue("View must close after saving successfully", view.closed)
+
+        val savedRule = repo.rules.first()
+        assertEquals("Forward SMS → Delete", savedRule.name)
+        assertEquals("", savedRule.matchSender)
+        assertEquals(customBankRegex, savedRule.matchBody)
+        assertTrue(savedRule.matchBodyIsRegex)
+        assertEquals(0L, savedRule.delayMs)
+        val steps = savedRule.getActionSteps()
+        assertEquals(2, steps.size)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, steps[0].action)
+        assertEquals("+919876543210", steps[0].forwardToPhone)
+        assertTrue(steps[0].appendSenderToForward)
+        assertEquals(AutomationRule.ACTION_DELETE, steps[1].action)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 11. Database ID Math on Empty DB and Incremental Rule Allocation
+    // ────────────────────────────────────────────────────────────────────
+    @Suppress("UNCHECKED_CAST")
+    @Test
+    fun testRepositoryAssignsPositiveNonZeroIdOnEmptyDatabaseAndSequentialIncrements() {
+        val mockRealm = Mockito.mock(io.realm.Realm::class.java)
+        val captor = ArgumentCaptor.forClass(AutomationRule::class.java)
+        var maxIdInDb: Number? = null
+
+        Mockito.doAnswer { invocation ->
+            val transaction = invocation.arguments[0] as io.realm.Realm.Transaction
+            transaction.execute(mockRealm)
+            null
+        }.`when`(mockRealm).executeTransaction(Mockito.any())
+
+        val query = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<AutomationRule>
+        Mockito.`when`(mockRealm.where(AutomationRule::class.java)).thenReturn(query)
+        Mockito.`when`(query.max("id")).thenAnswer { maxIdInDb }
+        Mockito.`when`(mockRealm.copyToRealmOrUpdate(captor.capture())).thenAnswer {
+            val saved = it.arguments[0] as AutomationRule
+            maxIdInDb = saved.id
+            saved
+        }
+
+        val repo = AutomationRuleRepositoryImpl { mockRealm }
+
+        // 1. First save on empty DB (max("id") is null): ID must be 1L, NOT 0L
+        val rule1 = AutomationRule(id = 0L, name = "Rule 1")
+        repo.saveRule(rule1)
+        assertEquals(1L, captor.allValues.last().id)
+        // Verify equalTo("id", ...) was NOT called since rule.id <= 0L
+        Mockito.verify(query, Mockito.never()).equalTo(Mockito.eq("id"), Mockito.anyLong())
+
+        // 2. Second save (max("id") is now 1L): ID must be 2L
+        val rule2 = AutomationRule(id = 0L, name = "Rule 2")
+        repo.saveRule(rule2)
+        assertEquals(2L, captor.allValues.last().id)
+
+        // 3. Updating existing rule with id = 1L preserves positive id
+        Mockito.`when`(query.equalTo("id", 1L)).thenReturn(query)
+        Mockito.`when`(query.findFirst()).thenReturn(captor.allValues.first())
+        val ruleUpdate = AutomationRule(id = 1L, name = "Rule 1 Updated")
+        repo.saveRule(ruleUpdate)
+        assertEquals(1L, captor.allValues.last().id)
+        Mockito.verify(query).equalTo("id", 1L)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 12. Incoming Message Matching with Blank Sender and Async Forward Visibility
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testBankAlertMatchingWithBlankSenderAndAsyncForwardKeepsMessageVisible() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val contactsRepo = FakeContactRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+
+        val interactor = ExecuteAutomations(dummyContext(), autoRepo, contactsRepo, messageRepo, convRepo)
+
+        // Rule configured with blank sender and custom bank alert regex
+        val bankRegex = "(?i)\\b(debited|credited|balance|INR|transaction|account|spent)\\b"
+        val rule = AutomationRule(
+            id = 1L,
+            name = "Forward SMS → Delete",
+            enabled = true,
+            matchSender = "",
+            matchBody = bankRegex,
+            matchBodyIsRegex = true,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+919876543210"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+        autoRepo.rules.add(rule)
+
+        // Message 1: Bank alert from alphanumeric header
+        val bankMessage = createMessage(1001L, 501L, "VK-HDFCBK", "INR 1,500.00 debited from account XX1234 on 16-OCT-26")
+        val result1 = interactor.execute(bankMessage)
+
+        // Must match rule (hitCount incremented)
+        assertEquals(1L, autoRepo.hitCounts[1L])
+        // Must return Normal (not Dropped) so message remains visible while forward is pending
+        assertTrue("Message with async forward step must return Normal result",
+            result1 is ExecuteAutomations.ExecutionResult.Normal)
+        // Message must NOT be deleted yet by ExecuteAutomations directly
+        assertFalse(messageRepo.deletedMessageIds.contains(1001L))
+
+        // Message 2: Message from another sender that does NOT match bank alert keywords
+        val promoMessage = createMessage(1002L, 502L, "VM-AIRTEL", "Flat 50% discount on your next recharge")
+        val result2 = interactor.execute(promoMessage)
+
+        // Hit count remains 1 (promo didn't match)
+        assertEquals(1L, autoRepo.hitCounts[1L])
+        assertTrue(result2 is ExecuteAutomations.ExecutionResult.Normal)
+        assertFalse(messageRepo.deletedMessageIds.contains(1002L))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 13. Repository Failure Handled Gracefully Without Rx Uncaught Exception
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testSaveRuleRepositoryErrorHandledGracefullyWithoutCrashing() {
+        val repo = FakeAutomationRuleRepo().apply { throwOnSave = true }
+        val presenter = EditAutomationPresenter(repo)
+        val view = TestEditAutomationView()
+
+        presenter.setRuleId(-1L)
+        presenter.bindIntents(view)
+
+        // Click save - repo throws RuntimeException
+        view.saveClicksSubject.onNext(Unit)
+
+        // View should NOT be closed because save failed
+        assertFalse("View must remain open if saving failed", view.closed)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 14. Validation Error Paths
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testSaveRuleValidationRejectsEmptyForwardPhone() {
+        val repo = FakeAutomationRuleRepo()
+        val presenter = EditAutomationPresenter(repo)
+        val view = TestEditAutomationView()
+
+        presenter.setRuleId(-1L)
+        presenter.bindIntents(view)
+
+        // Add Forward SMS step with empty phone number
+        view.addStepSubject.onNext(Unit)
+        view.stepUpdatedSubject.onNext(0 to AutomationActionStep(
+            action = AutomationRule.ACTION_FORWARD_SMS,
+            forwardToPhone = ""
+        ))
+
+        view.saveClicksSubject.onNext(Unit)
+
+        assertEquals(EditAutomationPresenter.VALIDATION_PHONE, view.lastValidationError)
+        assertEquals(0, repo.saveCount)
+        assertFalse(view.closed)
+    }
+
+    @Test
+    fun testSaveRuleValidationRejectsInvalidHttpUrl() {
+        val repo = FakeAutomationRuleRepo()
+        val presenter = EditAutomationPresenter(repo)
+        val view = TestEditAutomationView()
+
+        presenter.setRuleId(-1L)
+        presenter.bindIntents(view)
+
+        // Add Forward HTTP step with invalid URL
+        view.addStepSubject.onNext(Unit)
+        view.stepUpdatedSubject.onNext(0 to AutomationActionStep(
+            action = AutomationRule.ACTION_FORWARD_HTTP,
+            forwardToUrl = "ftp://invalid-url.com"
+        ))
+
+        view.saveClicksSubject.onNext(Unit)
+
+        assertEquals(EditAutomationPresenter.VALIDATION_URL, view.lastValidationError)
+        assertEquals(0, repo.saveCount)
+        assertFalse(view.closed)
+    }
+
+    @Test
+    fun testSaveRuleValidationRejectsEmptyReplyTemplate() {
+        val repo = FakeAutomationRuleRepo()
+        val presenter = EditAutomationPresenter(repo)
+        val view = TestEditAutomationView()
+
+        presenter.setRuleId(-1L)
+        presenter.bindIntents(view)
+
+        // Add Auto Reply step with empty template
+        view.addStepSubject.onNext(Unit)
+        view.stepUpdatedSubject.onNext(0 to AutomationActionStep(
+            action = AutomationRule.ACTION_AUTO_REPLY,
+            replyTemplate = ""
+        ))
+
+        view.saveClicksSubject.onNext(Unit)
+
+        assertEquals(EditAutomationPresenter.VALIDATION_TEMPLATE, view.lastValidationError)
+        assertEquals(0, repo.saveCount)
+        assertFalse(view.closed)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 15. End-to-End Worker Step-by-Step Execution: Forward SMS then Delete
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testEndToEndWorkerPipelineExecutionForwardSmsThenDelete() {
+        val workId = UUID.randomUUID().toString()
+        val mockContext = dummyContext()
+        val fakeMessageRepo = FakeMessageRepo()
+        val mockConvRepo = Mockito.mock(ConversationRepository::class.java)
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val steps = listOf(
+            AutomationActionStep(
+                action = AutomationRule.ACTION_FORWARD_SMS,
+                forwardToPhone = "+919876543210",
+                appendSenderToForward = true
+            ),
+            AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+        )
+        val actionsJson = AutomationActionStepSerializer.toJson(steps)
+        val inputData = androidx.work.Data.Builder()
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 2026L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 5050L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "VK-HDFCBK")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "INR 500 debited from AC 1234")
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
+            isAccessible = true
+            set(workerParams, 0)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(mockContext, workerParams)
+        worker.messageRepo = fakeMessageRepo
+        worker.conversationRepo = mockConvRepo
+        worker.notificationManager = mockNotificationManager
+
+        val result = worker.doWork()
+
+        assertEquals(androidx.work.ListenableWorker.Result.success(), result)
+
+        // Verify Step 0: Forward SMS sent with correct recipient, body, and sender appended
+        val expectedBody = "From: VK-HDFCBK | INR 500 debited from AC 1234"
+        assertEquals(1, fakeMessageRepo.sentMessages.size)
+        val sent = fakeMessageRepo.sentMessages.first()
+        assertEquals(listOf("+919876543210"), sent.first)
+        assertEquals(expectedBody, sent.second)
+
+        // Verify Step 1: deleteMessages executed with correct message ID
+        assertEquals(listOf(2026L), fakeMessageRepo.deletedMessageIds)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 16. Idempotent setRuleId Does Not Wipe In-Progress Edits on Reattach
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testSetRuleIdIsIdempotentAndDoesNotWipeEditsOnReattach() {
+        val repo = FakeAutomationRuleRepo()
+        val presenter = EditAutomationPresenter(repo)
+        val view = TestEditAutomationView()
+
+        // First attach: set new rule (-1L)
+        presenter.setRuleId(-1L)
+        presenter.bindIntents(view)
+
+        // User edits body and adds custom regex
+        val customBankRegex = "(?i)\\b(debited|credited|balance|INR|transaction)\\b"
+        view.matchBodySubject.onNext(customBankRegex)
+        view.matchBodyRegexSubject.onNext(true)
+
+        // Controller reattached (e.g. after returning from contact picker or rotation)
+        // onAttach invokes setRuleId(-1L) again
+        presenter.setRuleId(-1L)
+
+        // Verify that custom body text and regex state are NOT wiped
+        val currentState = presenter.stateObservable.blockingFirst()
+        assertEquals(customBankRegex, currentState.matchBody)
+        assertTrue(currentState.matchBodyIsRegex)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 17. AutomationsPresenter Handles Delete and Toggle Failures Gracefully
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testAutomationsPresenterHandlesDeleteAndToggleFailuresGracefully() {
+        val repo = FakeAutomationRuleRepo().apply {
+            rules.add(AutomationRule(id = 100L, name = "Rule 100", enabled = true))
+            throwOnDelete = true
+            throwOnSave = true
+        }
+
+        val presenter = AutomationsPresenter(repo)
+        val deleteConfirmedSubject = PublishSubject.create<Long>()
+        val toggleSubject = PublishSubject.create<Long>()
+
+        val lifecycleOwner = object : LifecycleOwner {
+            private val registry = LifecycleRegistry(this).apply {
+                currentState = Lifecycle.State.RESUMED
+            }
+            override val lifecycle: Lifecycle get() = registry
+        }
+        val view = object : AutomationsView {
+            override val lifecycle: Lifecycle get() = lifecycleOwner.lifecycle
+            override fun addRuleClicks(): Observable<*> = Observable.empty<Unit>()
+            override fun editRuleClicks(): Observable<Long> = Observable.empty<Long>()
+            override fun deleteRuleClicks(): Observable<Long> = Observable.empty<Long>()
+            override fun deleteRuleConfirmed(): Observable<Long> = deleteConfirmedSubject
+            override fun toggleRuleClicks(): Observable<Long> = toggleSubject
+            override fun showEditRule(ruleId: Long) {}
+            override fun confirmDelete(ruleId: Long) {}
+            override fun render(state: AutomationsState) {}
+        }
+        presenter.bindIntents(view)
+
+        // Trigger delete which throws RuntimeException in repository
+        // Must NOT crash with uncaught OnErrorNotImplementedException
+        deleteConfirmedSubject.onNext(100L)
+
+        // Trigger toggle which throws RuntimeException in repository
+        // Must NOT crash with uncaught OnErrorNotImplementedException
+        toggleSubject.onNext(100L)
+
+        // Rule should still be in repo (since both operations failed and were swallowed gracefully)
+        assertNotNull(repo.getRule(100L))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 18. Single Step Immediate Delete Pipeline with Bank Alert Regex
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testSingleStepImmediateDeletePipelineWithBankAlertRegexAndBlankSender() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val contactsRepo = FakeContactRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+
+        val interactor = ExecuteAutomations(dummyContext(), autoRepo, contactsRepo, messageRepo, convRepo)
+
+        // Rule configured with blank sender, custom bank alert regex, 0s delay, single step DELETE
+        val bankRegex = "(?i)\\b(debited|credited|balance|INR|transaction)\\b"
+        val rule = AutomationRule(
+            id = 1L,
+            name = "Delete Bank Alerts",
+            enabled = true,
+            matchSender = "",
+            matchBody = bankRegex,
+            matchBodyIsRegex = true,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+        autoRepo.rules.add(rule)
+
+        // Incoming bank SMS
+        val bankMessage = createMessage(3001L, 701L, "AD-ICICIB", "INR 2,499.00 debited from AC 9876 on 16-OCT-26")
+        val result = interactor.execute(bankMessage)
+
+        // Single immediate DELETE: result must be Dropped (instant suppression)
+        assertTrue("Single immediate DELETE rule must return Dropped result",
+            result is ExecuteAutomations.ExecutionResult.Dropped)
+        // Message must be deleted immediately in messageRepo
+        assertTrue("Message must be deleted immediately by ExecuteAutomations",
+            messageRepo.deletedMessageIds.contains(3001L))
+        // Hit count must be incremented
+        assertEquals(1L, autoRepo.hitCounts[1L])
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 19. Multi-Step Pipeline with Three Actions: Mark Read, Forward, Delete
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testMultiStepPipelineWithThreeActions_MarkReadForwardThenDelete() {
+        val workId = UUID.randomUUID().toString()
+        val mockContext = dummyContext()
+        val fakeMessageRepo = FakeMessageRepo()
+        val mockConvRepo = Mockito.mock(ConversationRepository::class.java)
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val steps = listOf(
+            AutomationActionStep(action = AutomationRule.ACTION_MARK_READ),
+            AutomationActionStep(
+                action = AutomationRule.ACTION_FORWARD_SMS,
+                forwardToPhone = "+15551234567",
+                appendSenderToForward = false
+            ),
+            AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+        )
+        val actionsJson = AutomationActionStepSerializer.toJson(steps)
+        val inputData = androidx.work.Data.Builder()
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 4001L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 888L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "ALERT-SMS")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Transaction OTP is 492810")
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
+            isAccessible = true
+            set(workerParams, 0)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(mockContext, workerParams)
+        worker.messageRepo = fakeMessageRepo
+        worker.conversationRepo = mockConvRepo
+        worker.notificationManager = mockNotificationManager
+
+        val result = worker.doWork()
+        assertEquals(androidx.work.ListenableWorker.Result.success(), result)
+
+        // Step 0: Mark read executed
+        assertTrue(fakeMessageRepo.markedReadThreadIds.contains(888L))
+        // Step 1: Forward SMS executed (without sender prepended per setting)
+        assertEquals(1, fakeMessageRepo.sentMessages.size)
+        val sent = fakeMessageRepo.sentMessages.first()
+        assertEquals(listOf("+15551234567"), sent.first)
+        assertEquals("Transaction OTP is 492810", sent.second)
+        // Step 2: Delete executed
+        assertTrue(fakeMessageRepo.deletedMessageIds.contains(4001L))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 20. Complete Start-to-End Flow: Rule Creation, Persistence, and Multi-Step Execution
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testCompleteStartToEndFlow_RuleCreationPersistenceAndMultiStepExecution() {
+        val repo = FakeAutomationRuleRepo()
+        val presenter = EditAutomationPresenter(repo)
+        val view = TestEditAutomationView()
+
+        // Phase 1: User creates new rule in EditAutomationPresenter
+        presenter.setRuleId(-1L)
+        presenter.bindIntents(view)
+
+        val customBankRegex = "(?i)\\b(debited|credited|balance|INR|transaction)\\b"
+        view.nameSubject.onNext("Bank Alert Pipeline")
+        view.matchSenderSubject.onNext("") // blank sender
+        view.matchBodySubject.onNext(customBankRegex)
+        view.matchBodyRegexSubject.onNext(true)
+        view.delaySubject.onNext(0L)
+
+        // Add Forward SMS step: chain becomes [FORWARD_SMS, DELETE]
+        view.addStepSubject.onNext(Unit)
+        view.stepUpdatedSubject.onNext(0 to AutomationActionStep(
+            action = AutomationRule.ACTION_FORWARD_SMS,
+            forwardToPhone = "+919999988888",
+            appendSenderToForward = true
+        ))
+
+        view.saveClicksSubject.onNext(Unit)
+
+        // Phase 2: Verify rule is persisted and view is closed
+        assertTrue("View must be closed after saving", view.closed)
+        assertEquals(1, repo.saveCount)
+        val savedRule = repo.rules.first()
+        savedRule.id = 1L // Repo assigns ID 1L
+        assertEquals("Bank Alert Pipeline", savedRule.name)
+
+        // Phase 3: Incoming message matching bank regex arrives
+        val contactsRepo = FakeContactRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+        val interactor = ExecuteAutomations(dummyContext(), repo, contactsRepo, messageRepo, convRepo)
+
+        val incomingBankMsg = createMessage(9001L, 333L, "VM-HDFCBK", "INR 750.00 debited from account 1234")
+        val execResult = interactor.execute(incomingBankMsg)
+
+        // Must match rule and increment hit count
+        assertEquals(1L, repo.hitCounts[1L])
+        // Must return Normal so message stays visible until worker runs
+        assertTrue(execResult is ExecuteAutomations.ExecutionResult.Normal)
+        assertFalse(messageRepo.deletedMessageIds.contains(9001L))
+
+        // Phase 4: Worker executes [FORWARD_SMS, DELETE]
+        val workId = UUID.randomUUID().toString()
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+        val actionsJson = AutomationActionStepSerializer.toJson(savedRule.getActionSteps())
+        val inputData = androidx.work.Data.Builder()
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 9001L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 333L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "VM-HDFCBK")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, incomingBankMsg.body)
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
+            isAccessible = true
+            set(workerParams, 0)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = Mockito.mock(ConversationRepository::class.java)
+        worker.notificationManager = mockNotificationManager
+
+        val workerResult = worker.doWork()
+        assertEquals(androidx.work.ListenableWorker.Result.success(), workerResult)
+
+        // Forward sent
+        assertEquals(1, messageRepo.sentMessages.size)
+        val sentMsg = messageRepo.sentMessages.first()
+        assertEquals(listOf("+919999988888"), sentMsg.first)
+        assertEquals("From: VM-HDFCBK | INR 750.00 debited from account 1234", sentMsg.second)
+
+        // Message deleted
+        assertEquals(listOf(9001L), messageRepo.deletedMessageIds)
+    }
 }
+
