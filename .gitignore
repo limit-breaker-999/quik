@@ -50,12 +50,16 @@ freeline.py
 freeline/
 freeline_project_description.json
 
-# secrets / keystore files
-my-release-key.keystore
-my-release-key.keystore.base64
-.secrets
-android-keystore/keystore.b64
-keystore.p12
-config.yml
+# Keystores & Cryptographic Secrets
+*.keystore
+*.p12
 *.jks
+*.key
+*.b64
+secrets.tar.enc
+keystore.properties
+.secrets
+.env*
+my-release-key.keystore.base64
+config.yml
 

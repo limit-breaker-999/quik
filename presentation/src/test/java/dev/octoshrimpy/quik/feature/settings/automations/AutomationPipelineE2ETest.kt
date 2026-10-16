@@ -1452,5 +1452,53 @@ class AutomationPipelineE2ETest {
         // Message deleted
         assertEquals(listOf(9001L), messageRepo.deletedMessageIds)
     }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 21. Multi-Threaded Concurrency & Isolation in AutomationActionWorker Ledger
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testAutomationActionWorkerLedgerConcurrentMarkAndRead() {
+        val workId1 = UUID.randomUUID().toString()
+        val workId2 = UUID.randomUUID().toString()
+        val mockContext = dummyContext()
+
+        AutomationActionWorker.clearLedger()
+
+        val numThreads = 10
+        val latch = java.util.concurrent.CountDownLatch(numThreads)
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(numThreads)
+        val exceptions = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+
+        for (i in 0 until numThreads) {
+            val step = i
+            executor.submit {
+                try {
+                    AutomationActionWorker.markStepCompleted(workId1, step, mockContext)
+                    val completed = AutomationActionWorker.getCompletedSteps(workId1, mockContext)
+                    assertTrue(completed.contains(step))
+                } catch (t: Throwable) {
+                    exceptions.add(t)
+                } finally {
+                    latch.countDown()
+                }
+            }
+        }
+
+        assertTrue(latch.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        executor.shutdown()
+        assertTrue("Expected 0 exceptions during concurrent ledger updates, but got: $exceptions", exceptions.isEmpty())
+
+        val finalCompleted1 = AutomationActionWorker.getCompletedSteps(workId1, mockContext)
+        assertEquals(numThreads, finalCompleted1.size)
+
+        // Verify isolation for workId2
+        val completed2 = AutomationActionWorker.getCompletedSteps(workId2, mockContext)
+        assertTrue(completed2.isEmpty())
+
+        // Clear workId1 and verify workId2 unaffected
+        AutomationActionWorker.clearLedger(workId1, mockContext)
+        assertTrue(AutomationActionWorker.getCompletedSteps(workId1, mockContext).isEmpty())
+    }
 }
+
 

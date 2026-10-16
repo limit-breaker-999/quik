@@ -23,8 +23,11 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import dagger.android.AndroidInjection
 import dev.octoshrimpy.quik.common.util.extensions.getLabel
@@ -78,7 +81,16 @@ class RestoreBackupService : Service() {
     private fun start(intent: Intent) {
         val notificationManager = NotificationManagerCompat.from(this)
 
-        startForeground(NOTIFICATION_ID, notification.build())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                notification.build(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification.build())
+        }
 
         backupRepo.getRestoreProgress()
             .sample(200, TimeUnit.MILLISECONDS, true)
