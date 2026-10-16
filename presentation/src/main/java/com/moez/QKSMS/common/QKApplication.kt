@@ -98,6 +98,7 @@ class QKApplication : Application(), HasActivityInjector, HasBroadcastReceiverIn
                 .compactOnLaunch()
                 .migration(realmMigration)
                 .schemaVersion(QkRealmMigration.SCHEMA_VERSION)
+                .allowWritesOnUiThread(true)
                 .build())
 
         qkMigration.performMigration()

@@ -34,20 +34,25 @@ class AutomationsPresenter @Inject constructor(
 
         view.deleteRuleConfirmed()
             .observeOn(Schedulers.io())
-            .doOnNext(automationRepo::deleteRule)
             .subscribeOn(Schedulers.io())
             .autoDisposable(view.scope())
-            .subscribe()
+            .subscribe(
+                { ruleId -> automationRepo.deleteRule(ruleId) },
+                { e -> Timber.e(e, "Failed to delete rule") }
+            )
 
         view.toggleRuleClicks()
             .throttleFirst(300, TimeUnit.MILLISECONDS)
             .observeOn(Schedulers.io())
             .subscribeOn(Schedulers.io())
             .autoDisposable(view.scope())
-            .subscribe { ruleId ->
-                val rule = automationRepo.getRule(ruleId) ?: return@subscribe
-                automationRepo.saveRule(rule.apply { enabled = !enabled })
-            }
+            .subscribe(
+                { ruleId ->
+                    val rule = automationRepo.getRule(ruleId) ?: return@subscribe
+                    automationRepo.saveRule(rule.apply { enabled = !enabled })
+                },
+                { e -> Timber.e(e, "Failed to toggle rule") }
+            )
     }
 
     override fun onCleared() {

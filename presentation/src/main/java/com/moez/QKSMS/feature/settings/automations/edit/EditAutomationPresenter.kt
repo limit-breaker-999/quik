@@ -7,7 +7,10 @@ import dev.octoshrimpy.quik.model.AutomationActionStep
 import dev.octoshrimpy.quik.model.AutomationRule
 import dev.octoshrimpy.quik.model.AutomationStepHelper
 import dev.octoshrimpy.quik.repository.AutomationRuleRepository
+import io.reactivex.Completable
 import io.reactivex.Observable
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.schedulers.Schedulers
 import java.util.concurrent.TimeUnit
 import timber.log.Timber
 import javax.inject.Inject
@@ -17,8 +20,11 @@ class EditAutomationPresenter @Inject constructor(
 ) : QkPresenter<EditAutomationView, EditAutomationState>(EditAutomationState()) {
 
     val stateObservable: Observable<EditAutomationState> get() = state
+    private var initialized = false
 
     fun setRuleId(ruleId: Long) {
+        if (initialized) return
+        initialized = true
         if (ruleId < 0) {
             newState { copy(ruleId = -1L, isNew = true, actionSteps = listOf(AutomationActionStep(action = AutomationRule.ACTION_DELETE))) }
             return
@@ -137,6 +143,7 @@ class EditAutomationPresenter @Inject constructor(
 
         view.saveClicks()
             .throttleFirst(500, TimeUnit.MILLISECONDS)
+            .observeOn(AndroidSchedulers.mainThread())
             .withLatestFrom(state) { _, s -> s }
             .autoDisposable(view.scope())
             .subscribe { s ->
@@ -198,8 +205,11 @@ class EditAutomationPresenter @Inject constructor(
                 )
                 rule.setActionSteps(s.actionSteps)
                 Timber.d("Saving automation rule: ${rule.name}")
-                automationRepo.saveRule(rule)
-                view.close()
+                Completable.fromAction { automationRepo.saveRule(rule) }
+                    .subscribeOn(Schedulers.io())
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .autoDisposable(view.scope())
+                    .subscribe({ view.close() }, { e -> Timber.e(e, "Failed to save rule") })
             }
 
         view.presetClicks()

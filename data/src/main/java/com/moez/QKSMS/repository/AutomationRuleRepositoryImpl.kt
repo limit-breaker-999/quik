@@ -80,12 +80,12 @@ class AutomationRuleRepositoryImpl(
                 // ID generation inside the transaction: atomic against
                 // concurrent saves, and doesn't mutate the caller's object
                 // (BUG-038/BUG-070)
-                val id = if (rule.id == 0L) {
-                    (realm.where(AutomationRule::class.java).max("id")?.toLong() ?: -1L) + 1L
+                val id = if (rule.id <= 0L) {
+                    (realm.where(AutomationRule::class.java).max("id")?.toLong() ?: 0L) + 1L
                 } else {
                     rule.id
                 }
-                val existing = if (rule.id != 0L) {
+                val existing = if (rule.id > 0L) {
                     realm.where(AutomationRule::class.java).equalTo("id", rule.id).findFirst()
                 } else null
 
