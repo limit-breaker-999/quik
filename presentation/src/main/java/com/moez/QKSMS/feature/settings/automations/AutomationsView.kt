@@ -10,7 +10,13 @@ interface AutomationsView : QkViewContract<AutomationsState> {
     fun deleteRuleConfirmed(): Observable<Long>
     fun toggleRuleClicks(): Observable<Long>
 
+    fun tabSelectedClicks(): Observable<Int> = Observable.empty()
+    fun retryFailedClicks(): Observable<Long> = Observable.empty()
+    fun dismissFailedClicks(): Observable<Long> = Observable.empty()
+    fun clearFailedClicks(): Observable<*> = Observable.empty<Unit>()
+    fun filterLogsClicks(): Observable<String> = Observable.empty()
+    fun clearLogsClicks(): Observable<*> = Observable.empty<Unit>()
+
     fun confirmDelete(ruleId: Long)
     fun showEditRule(ruleId: Long)
 }
-

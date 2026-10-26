@@ -67,6 +67,7 @@ class HousekeepingWorker(appContext: Context, workerParams: WorkerParameters)
     }
 
     @Inject lateinit var scheduledMessageRepository: ScheduledMessageRepository
+    @Inject lateinit var automationRepo: dev.octoshrimpy.quik.repository.AutomationRuleRepository
 
     override fun doWork(): Result {
         val twoHoursAgo = (System.currentTimeMillis() - (2 * 60 * 60 * 1000))
@@ -78,6 +79,14 @@ class HousekeepingWorker(appContext: Context, workerParams: WorkerParameters)
         removeSavedMessagesTexts(twoHoursAgo)
 
         removeOrphanedComposeDelayCancelledAttachments(twoHoursAgo)
+
+        if (::automationRepo.isInitialized) {
+            try {
+                automationRepo.pruneOldLogs(7)
+            } catch (e: Exception) {
+                timber.log.Timber.w(e, "Error pruning old automation logs")
+            }
+        }
 
         return Result.success()
     }

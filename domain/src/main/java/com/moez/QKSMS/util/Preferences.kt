@@ -31,7 +31,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class Preferences @Inject constructor(
+open class Preferences @Inject constructor(
     context: Context,
     private val rxPrefs: RxSharedPreferences,
     private val sharedPrefs: SharedPreferences

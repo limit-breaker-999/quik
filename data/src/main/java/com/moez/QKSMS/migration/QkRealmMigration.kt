@@ -20,7 +20,7 @@ package dev.octoshrimpy.quik.migration
 
 import android.annotation.SuppressLint
 import dev.octoshrimpy.quik.extensions.map
-import dev.octoshrimpy.quik.mapper.CursorToContactImpl
+import dev.octoshrimpy.quik.mapper.CursorToContact
 import dev.octoshrimpy.quik.util.Preferences
 import dev.octoshrimpy.quik.model.AutomationActionStep
 import dev.octoshrimpy.quik.model.AutomationActionStepSerializer
@@ -35,12 +35,12 @@ import timber.log.Timber
 import javax.inject.Inject
 
 class QkRealmMigration @Inject constructor(
-    private val cursorToContact: CursorToContactImpl,
+    private val cursorToContact: CursorToContact,
     private val prefs: Preferences
 ) : RealmMigration {
 
     companion object {
-        const val SCHEMA_VERSION: Long = 18
+        const val SCHEMA_VERSION: Long = 19
     }
 
     @SuppressLint("ApplySharedPref")
@@ -348,6 +348,36 @@ class QkRealmMigration @Inject constructor(
                     val step = AutomationActionStep(act, phone, url, appendSender, template)
                     obj.setString("actionsJson", AutomationActionStepSerializer.toJson(listOf(step)))
                 }
+
+            version++
+        }
+
+        if (version == 18L) {
+            realm.schema.create("FailedAutomationMessage")
+                .addField("id", Long::class.java, FieldAttribute.PRIMARY_KEY, FieldAttribute.REQUIRED)
+                .addField("messageId", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("threadId", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("subId", Int::class.java, FieldAttribute.REQUIRED)
+                .addField("sender", String::class.java, FieldAttribute.REQUIRED)
+                .addField("body", String::class.java, FieldAttribute.REQUIRED)
+                .addField("ruleId", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("ruleName", String::class.java, FieldAttribute.REQUIRED)
+                .addField("failedStepIndex", Int::class.java, FieldAttribute.REQUIRED)
+                .addField("failedActionType", String::class.java, FieldAttribute.REQUIRED)
+                .addField("errorMessage", String::class.java, FieldAttribute.REQUIRED)
+                .addField("timestamp", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("canRetry", Boolean::class.java, FieldAttribute.REQUIRED)
+                .addField("actionsJson", String::class.java, FieldAttribute.REQUIRED)
+
+            realm.schema.create("AutomationLog")
+                .addField("id", Long::class.java, FieldAttribute.PRIMARY_KEY, FieldAttribute.REQUIRED)
+                .addField("ruleId", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("ruleName", String::class.java, FieldAttribute.REQUIRED)
+                .addField("messageId", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("type", String::class.java, FieldAttribute.REQUIRED)
+                .addField("actionType", String::class.java, FieldAttribute.REQUIRED)
+                .addField("details", String::class.java, FieldAttribute.REQUIRED)
+                .addField("timestamp", Long::class.java, FieldAttribute.REQUIRED)
 
             version++
         }

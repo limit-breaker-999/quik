@@ -68,8 +68,10 @@ class InjectionWorkerFactory @Inject constructor(
             .newInstance(appContext, workerParameters)
 
         when (instance) {
-            is HousekeepingWorker ->
+            is HousekeepingWorker -> {
                 instance.scheduledMessageRepository = scheduledMessageRepository
+                instance.automationRepo = automationRepo
+            }
             is ReceiveSmsWorker -> {
                 instance.conversationRepo  = conversationRepo
                 instance.blockingClient = blockingClient
@@ -86,6 +88,7 @@ class InjectionWorkerFactory @Inject constructor(
                 instance.messageRepo = messageRepo
                 instance.conversationRepo = conversationRepo
                 instance.notificationManager = notificationManager
+                instance.automationRepo = automationRepo
             }
             is ReceiveMmsWorker -> {
                 instance.syncRepo = syncRepo
