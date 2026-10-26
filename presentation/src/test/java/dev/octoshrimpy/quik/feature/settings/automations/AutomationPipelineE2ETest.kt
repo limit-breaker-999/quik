@@ -10,8 +10,10 @@ import dev.octoshrimpy.quik.feature.settings.automations.edit.EditAutomationView
 import dev.octoshrimpy.quik.interactor.ExecuteAutomations
 import dev.octoshrimpy.quik.model.AutomationActionStep
 import dev.octoshrimpy.quik.model.AutomationActionStepSerializer
+import dev.octoshrimpy.quik.model.AutomationLog
 import dev.octoshrimpy.quik.model.AutomationRule
 import dev.octoshrimpy.quik.model.AutomationStepHelper
+import dev.octoshrimpy.quik.model.FailedAutomationMessage
 import dev.octoshrimpy.quik.model.Contact
 import dev.octoshrimpy.quik.model.ContactGroup
 import dev.octoshrimpy.quik.model.Conversation
@@ -70,6 +72,62 @@ class AutomationPipelineE2ETest {
         override fun incrementHitCount(id: Long) {
             hitCounts[id] = (hitCounts[id] ?: 0L) + 1L
         }
+
+        val failedMessages = mutableListOf<FailedAutomationMessage>()
+        val logs = mutableListOf<AutomationLog>()
+        var nextFailedId = 1L
+        var nextLogId = 1L
+
+        override fun getFailedMessagesList(): List<FailedAutomationMessage> = failedMessages.toList()
+
+        override fun saveFailedMessage(failedMessage: FailedAutomationMessage) {
+            if (failedMessage.id == 0L) {
+                failedMessage.id = nextFailedId++
+            }
+            failedMessages.removeAll { it.id == failedMessage.id }
+            failedMessages.add(failedMessage)
+        }
+
+        override fun deleteFailedMessage(id: Long) {
+            failedMessages.removeAll { it.id == id }
+        }
+
+        override fun clearFailedMessages() {
+            failedMessages.clear()
+        }
+
+        override fun getLogsList(type: String?): List<AutomationLog> {
+            return if (type == null || type.isBlank() || type == "ALL") {
+                logs.toList()
+            } else {
+                logs.filter { it.type.equals(type, ignoreCase = true) }
+            }
+        }
+
+        override fun log(ruleId: Long, ruleName: String, messageId: Long, type: String, actionType: String, details: String) {
+            logs.add(
+                AutomationLog(
+                    id = nextLogId++,
+                    ruleId = ruleId,
+                    ruleName = ruleName,
+                    messageId = messageId,
+                    type = type,
+                    actionType = actionType,
+                    details = details,
+                    timestamp = System.currentTimeMillis()
+                )
+            )
+        }
+
+        override fun clearLogs() {
+            logs.clear()
+        }
+
+        override fun pruneOldLogs(maxAgeDays: Int) {
+            val cutoff = System.currentTimeMillis() - (maxAgeDays.toLong() * 24 * 60 * 60 * 1000L)
+            logs.removeAll { it.timestamp < cutoff }
+        }
+
         override fun close() {}
     }
 
@@ -123,8 +181,14 @@ class AutomationPipelineE2ETest {
         override fun markDelivered(messageId: Long) {}
         override fun markDeliveryFailed(messageId: Long, resultCode: Int) {}
         val sentMessages = mutableListOf<Triple<Collection<String>, String, Int>>()
+        var failSend: Boolean = false
+        var throwOnSend: Exception? = null
 
         override fun sendNewMessages(subId: Int, toAddresses: Collection<String>, body: String, attachments: Collection<dev.octoshrimpy.quik.model.Attachment>, sendAsGroup: Boolean, delayMs: Int): Collection<Message> {
+            throwOnSend?.let { throw it }
+            if (failSend) {
+                return emptyList()
+            }
             sentMessages.add(Triple(toAddresses, body, subId))
             return listOf(Message().apply { this.id = 1234L; this.body = body })
         }
@@ -1498,6 +1562,636 @@ class AutomationPipelineE2ETest {
         // Clear workId1 and verify workId2 unaffected
         AutomationActionWorker.clearLedger(workId1, mockContext)
         assertTrue(AutomationActionWorker.getCompletedSteps(workId1, mockContext).isEmpty())
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 22. Action Failure in Chain with ACTION_DELETE: Deletes Original Message & Records Failure
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testActionFailureInChainWithDelete_deletesOriginalMessageAndCapturesFailure() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val rule = AutomationRule(
+            id = 101L,
+            name = "Forward OTP then Delete",
+            enabled = true
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15550001111"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+        autoRepo.rules.add(rule)
+
+        // Simulate SMS sending failure (e.g. carrier rejection or SIM missing)
+        messageRepo.failSend = true
+
+        val messageId = 7001L
+        val threadId = 444L
+        val sender = "+19998887777"
+        val body = "Your secure OTP is 765432"
+
+        val workId = UUID.randomUUID().toString()
+        val actionsJson = AutomationActionStepSerializer.toJson(rule.getActionSteps())
+        val inputData = androidx.work.Data.Builder()
+            .putLong(ExecuteAutomations.KEY_RULE_ID, rule.id)
+            .putString(ExecuteAutomations.KEY_RULE_NAME, rule.name)
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, messageId)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, threadId)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, sender)
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, body)
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
+            isAccessible = true
+            set(workerParams, 0)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = convRepo
+        worker.notificationManager = mockNotificationManager
+        worker.automationRepo = autoRepo
+
+        val workerResult = worker.doWork()
+
+        // 1. Worker must report failure
+        assertEquals(androidx.work.ListenableWorker.Result.failure(), workerResult)
+
+        // 2. Crucial Requirement: Original message MUST be deleted even though forward failed!
+        assertTrue("Message must be deleted per delete intention when chain has ACTION_DELETE",
+            messageRepo.deletedMessageIds.contains(messageId))
+        Mockito.verify(mockNotificationManager).update(threadId)
+
+        // 3. Failed message must be captured in repository
+        val failedList = autoRepo.getFailedMessagesList()
+        assertEquals(1, failedList.size)
+        val failed = failedList.first()
+        assertEquals(messageId, failed.messageId)
+        assertEquals(threadId, failed.threadId)
+        assertEquals(rule.id, failed.ruleId)
+        assertEquals(rule.name, failed.ruleName)
+        assertEquals(0, failed.failedStepIndex)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, failed.failedActionType)
+        assertTrue(failed.canRetry)
+        assertEquals(sender, failed.sender)
+        assertEquals(body, failed.body)
+        assertTrue(failed.errorMessage.contains("Carrier/provider rejected SMS send"))
+
+        // 4. Execution failure must be logged in AutomationLog
+        val errorLogs = autoRepo.getLogsList(AutomationLog.TYPE_ERROR)
+        assertEquals(1, errorLogs.size)
+        val errLog = errorLogs.first()
+        assertEquals(rule.id, errLog.ruleId)
+        assertEquals(rule.name, errLog.ruleName)
+        assertEquals(messageId, errLog.messageId)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, errLog.actionType)
+        assertTrue(errLog.details.contains("Carrier/provider rejected SMS send"))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 23. Action Failure in Chain WITHOUT ACTION_DELETE: Keeps Message in Inbox
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testActionFailureInChainWithoutDelete_doesNotDeleteOriginalMessage() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val rule = AutomationRule(
+            id = 102L,
+            name = "Forward Only",
+            enabled = true
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15550002222")
+            ))
+        }
+        autoRepo.rules.add(rule)
+
+        // Simulate SMS sending failure
+        messageRepo.failSend = true
+
+        val messageId = 7002L
+        val threadId = 445L
+
+        val workId = UUID.randomUUID().toString()
+        val actionsJson = AutomationActionStepSerializer.toJson(rule.getActionSteps())
+        val inputData = androidx.work.Data.Builder()
+            .putLong(ExecuteAutomations.KEY_RULE_ID, rule.id)
+            .putString(ExecuteAutomations.KEY_RULE_NAME, rule.name)
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, messageId)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, threadId)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "+1000111222")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Notice")
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
+            isAccessible = true
+            set(workerParams, 0)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = convRepo
+        worker.notificationManager = mockNotificationManager
+        worker.automationRepo = autoRepo
+
+        val workerResult = worker.doWork()
+
+        assertEquals(androidx.work.ListenableWorker.Result.failure(), workerResult)
+        // Message must NOT be deleted because rule has no ACTION_DELETE
+        assertFalse("Message must NOT be deleted when chain does not contain ACTION_DELETE",
+            messageRepo.deletedMessageIds.contains(messageId))
+
+        // But failure was still recorded
+        assertEquals(1, autoRepo.getFailedMessagesList().size)
+        assertEquals(1, autoRepo.getLogsList(AutomationLog.TYPE_ERROR).size)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 24. Activity Log Filtering by Type and Clearing
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testActivityLogFilteringAndClearing() {
+        val repo = FakeAutomationRuleRepo()
+
+        repo.log(1L, "Rule 1", 10L, AutomationLog.TYPE_INFO, "MATCH", "Matched message")
+        repo.log(1L, "Rule 1", 10L, AutomationLog.TYPE_SUCCESS, "FORWARD_SMS", "Forwarded")
+        repo.log(2L, "Rule 2", 20L, AutomationLog.TYPE_ERROR, "FORWARD_HTTP", "Webhook timed out")
+        repo.log(3L, "Rule 3", 30L, AutomationLog.TYPE_SUCCESS, "DELETE", "Deleted message")
+        repo.log(2L, "Rule 2", 20L, AutomationLog.TYPE_ERROR, "FORWARD_HTTP", "Retry failed")
+
+        // Unfiltered / ALL
+        assertEquals(5, repo.getLogsList("ALL").size)
+        assertEquals(5, repo.getLogsList(null).size)
+        assertEquals(5, repo.getLogsList("").size)
+
+        // Filter by ERROR
+        val errorLogs = repo.getLogsList(AutomationLog.TYPE_ERROR)
+        assertEquals(2, errorLogs.size)
+        assertTrue(errorLogs.all { it.type == AutomationLog.TYPE_ERROR })
+
+        // Filter by SUCCESS
+        val successLogs = repo.getLogsList(AutomationLog.TYPE_SUCCESS)
+        assertEquals(2, successLogs.size)
+        assertTrue(successLogs.all { it.type == AutomationLog.TYPE_SUCCESS })
+
+        // Clear logs
+        repo.clearLogs()
+        assertEquals(0, repo.getLogsList().size)
+        assertEquals(0, repo.getLogsList("ALL").size)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 25. Failed Messages Dismiss and Clear
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testFailedMessagesDismissAndClear() {
+        val repo = FakeAutomationRuleRepo()
+
+        val msg1 = FailedAutomationMessage(
+            id = 10L,
+            messageId = 100L,
+            ruleId = 1L,
+            ruleName = "Rule 1",
+            sender = "111",
+            body = "Body 1",
+            errorMessage = "Error 1"
+        )
+        val msg2 = FailedAutomationMessage(
+            id = 20L,
+            messageId = 200L,
+            ruleId = 2L,
+            ruleName = "Rule 2",
+            sender = "222",
+            body = "Body 2",
+            errorMessage = "Error 2"
+        )
+
+        repo.saveFailedMessage(msg1)
+        repo.saveFailedMessage(msg2)
+        assertEquals(2, repo.getFailedMessagesList().size)
+
+        // Dismiss single message
+        repo.deleteFailedMessage(10L)
+        val remaining = repo.getFailedMessagesList()
+        assertEquals(1, remaining.size)
+        assertEquals(20L, remaining.first().id)
+
+        // Clear all failed messages
+        repo.clearFailedMessages()
+        assertTrue(repo.getFailedMessagesList().isEmpty())
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 26. AutomationsPresenter Tab Switching & Failed Message Retry/Dismiss
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testAutomationsPresenter_tabSwitchingAndFailedMessageRetry() {
+        val repo = FakeAutomationRuleRepo()
+        val presenter = AutomationsPresenter(repo)
+
+        val tabSubject = PublishSubject.create<Int>()
+        val retrySubject = PublishSubject.create<Long>()
+        val dismissSubject = PublishSubject.create<Long>()
+        val clearFailedSubject = PublishSubject.create<Unit>()
+        val filterLogsSubject = PublishSubject.create<String>()
+        val clearLogsSubject = PublishSubject.create<Unit>()
+
+        var latestState: AutomationsState? = null
+
+        val lifecycleOwner = object : LifecycleOwner {
+            private val registry = LifecycleRegistry(this).apply {
+                currentState = Lifecycle.State.RESUMED
+            }
+            override val lifecycle: Lifecycle get() = registry
+        }
+
+        val view = object : AutomationsView {
+            override val lifecycle: Lifecycle get() = lifecycleOwner.lifecycle
+            override fun addRuleClicks(): Observable<*> = Observable.empty<Unit>()
+            override fun editRuleClicks(): Observable<Long> = Observable.empty<Long>()
+            override fun deleteRuleClicks(): Observable<Long> = Observable.empty<Long>()
+            override fun deleteRuleConfirmed(): Observable<Long> = Observable.empty<Long>()
+            override fun toggleRuleClicks(): Observable<Long> = Observable.empty<Long>()
+
+            override fun tabSelectedClicks(): Observable<Int> = tabSubject
+            override fun retryFailedClicks(): Observable<Long> = retrySubject
+            override fun dismissFailedClicks(): Observable<Long> = dismissSubject
+            override fun clearFailedClicks(): Observable<*> = clearFailedSubject
+            override fun filterLogsClicks(): Observable<String> = filterLogsSubject
+            override fun clearLogsClicks(): Observable<*> = clearLogsSubject
+
+            override fun confirmDelete(ruleId: Long) {}
+            override fun showEditRule(ruleId: Long) {}
+            override fun render(state: AutomationsState) {
+                latestState = state
+            }
+        }
+
+        val stateObserver = presenter.stateObservable.test()
+        presenter.bindIntents(view)
+
+        // 1. Initial tab is TAB_RULES (0)
+        assertEquals(AutomationsState.TAB_RULES, stateObserver.values().last().selectedTab)
+
+        // 2. Switch to Failed Messages tab (1)
+        tabSubject.onNext(AutomationsState.TAB_FAILED)
+        assertEquals(AutomationsState.TAB_FAILED, stateObserver.values().last().selectedTab)
+
+        // 3. Switch to Activity Logs tab (2)
+        tabSubject.onNext(AutomationsState.TAB_LOGS)
+        assertEquals(AutomationsState.TAB_LOGS, stateObserver.values().last().selectedTab)
+
+        // 4. Save a failed message and trigger retry with a deterministic workManagerEnqueuer
+        var enqueuedRequest: androidx.work.OneTimeWorkRequest? = null
+        var shouldThrowOnEnqueue = false
+
+        val testPresenter = AutomationsPresenter(repo) { req ->
+            if (shouldThrowOnEnqueue) {
+                throw IllegalStateException("Simulated WorkManager queue failure")
+            }
+            enqueuedRequest = req
+        }
+
+        val testView = object : AutomationsView {
+            override val lifecycle: Lifecycle get() = lifecycleOwner.lifecycle
+            override fun addRuleClicks(): Observable<*> = Observable.empty<Unit>()
+            override fun editRuleClicks(): Observable<Long> = Observable.empty<Long>()
+            override fun deleteRuleClicks(): Observable<Long> = Observable.empty<Long>()
+            override fun deleteRuleConfirmed(): Observable<Long> = Observable.empty<Long>()
+            override fun toggleRuleClicks(): Observable<Long> = Observable.empty<Long>()
+
+            override fun tabSelectedClicks(): Observable<Int> = tabSubject
+            override fun retryFailedClicks(): Observable<Long> = retrySubject
+            override fun dismissFailedClicks(): Observable<Long> = dismissSubject
+            override fun clearFailedClicks(): Observable<*> = clearFailedSubject
+            override fun filterLogsClicks(): Observable<String> = filterLogsSubject
+            override fun clearLogsClicks(): Observable<*> = clearLogsSubject
+
+            override fun confirmDelete(ruleId: Long) {}
+            override fun showEditRule(ruleId: Long) {}
+            override fun render(state: AutomationsState) {}
+        }
+        testPresenter.bindIntents(testView)
+
+        val failedMsg = FailedAutomationMessage(
+            id = 555L,
+            messageId = 12345L,
+            threadId = 999L,
+            ruleId = 42L,
+            ruleName = "Bank Forwarder",
+            sender = "+19998887777",
+            body = "Debit alert",
+            failedStepIndex = 0,
+            failedActionType = AutomationRule.ACTION_FORWARD_SMS,
+            errorMessage = "Carrier error",
+            actionsJson = AutomationActionStepSerializer.toJson(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15551234567")
+            ))
+        )
+        repo.saveFailedMessage(failedMsg)
+        assertEquals(1, repo.getFailedMessagesList().size)
+
+        // 4a. Failure resilience: If WorkManager fails to enqueue, failed message MUST NOT be deleted
+        shouldThrowOnEnqueue = true
+        retrySubject.onNext(555L)
+
+        // Wait brief moment for Schedulers.io
+        Thread.sleep(100)
+        assertEquals("Failed message must NOT be deleted when enqueue fails",
+            1, repo.getFailedMessagesList().size)
+        assertTrue(repo.logs.any { it.actionType == "RETRY" && it.type == AutomationLog.TYPE_ERROR })
+
+        // 4b. Successful retry: wait for throttleFirst window (500ms) to elapse
+        Thread.sleep(600)
+        shouldThrowOnEnqueue = false
+        retrySubject.onNext(555L)
+        Thread.sleep(200)
+
+        assertNotNull("Work request must be enqueued on successful retry", enqueuedRequest)
+        assertTrue("Failed message must be removed after retry is dispatched",
+            repo.getFailedMessagesList().isEmpty())
+        assertTrue(repo.logs.any { it.actionType == "RETRY" && it.ruleId == 42L && it.type == AutomationLog.TYPE_INFO })
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 27. Housekeeping Prunes Logs Older Than 7 Days
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testHousekeepingWorkerPrunesOldLogs() {
+        val repo = FakeAutomationRuleRepo()
+        val now = System.currentTimeMillis()
+        val eightDaysAgo = now - (8L * 24 * 60 * 60 * 1000L)
+        val twoDaysAgo = now - (2L * 24 * 60 * 60 * 1000L)
+
+        repo.logs.add(AutomationLog(
+            id = 1L, ruleId = 1L, ruleName = "Old Rule", messageId = 10L,
+            type = AutomationLog.TYPE_SUCCESS, actionType = "DELETE",
+            details = "Old action", timestamp = eightDaysAgo
+        ))
+        repo.logs.add(AutomationLog(
+            id = 2L, ruleId = 1L, ruleName = "Recent Rule", messageId = 11L,
+            type = AutomationLog.TYPE_SUCCESS, actionType = "DELETE",
+            details = "Recent action", timestamp = twoDaysAgo
+        ))
+        repo.logs.add(AutomationLog(
+            id = 3L, ruleId = 2L, ruleName = "Current Rule", messageId = 12L,
+            type = AutomationLog.TYPE_INFO, actionType = "MATCH",
+            details = "Current action", timestamp = now
+        ))
+
+        assertEquals(3, repo.logs.size)
+
+        // Prune logs older than 7 days
+        repo.pruneOldLogs(7)
+
+        val remaining = repo.logs
+        assertEquals(2, remaining.size)
+        assertFalse(remaining.any { it.id == 1L })
+        assertTrue(remaining.any { it.id == 2L })
+        assertTrue(remaining.any { it.id == 3L })
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 28. ExecuteAutomations Delete Preservation & Failure Persistence on Schedule Failure
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testExecuteAutomations_deletesMessageAndLogsFailureWhenSchedulingFails() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val contactsRepo = FakeContactRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+
+        val interactor = ExecuteAutomations(
+            dummyContext(), autoRepo, contactsRepo, messageRepo, convRepo,
+            workManagerEnqueuer = { throw IllegalStateException("WorkManager rejected enqueue") }
+        )
+
+        // Rule with async action FORWARD_SMS and ACTION_DELETE
+        val rule = AutomationRule(
+            id = 77L,
+            name = "Forward & Delete Rule",
+            enabled = true,
+            matchBody = "Secret"
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15551234567"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+        autoRepo.rules.add(rule)
+
+        // Incoming message: dummyContext() does not have real WorkManager, so scheduleAction will catch Throwable and return false
+        val message = createMessage(999L, 888L, "+19998887777", "Secret Code 1234")
+        val result = interactor.execute(message)
+
+        // Result MUST be Dropped because rule has ACTION_DELETE and scheduling failed
+        assertTrue("Failed chain with ACTION_DELETE must drop notification & conversation",
+            result is ExecuteAutomations.ExecutionResult.Dropped)
+
+        // Message must be deleted from database
+        assertTrue("Message must be deleted from messageRepo on scheduling failure",
+            messageRepo.deletedMessageIds.contains(999L))
+
+        // Failed message must be captured for manual review/retry
+        assertEquals(1, autoRepo.getFailedMessagesList().size)
+        val failed = autoRepo.getFailedMessagesList().first()
+        assertEquals(999L, failed.messageId)
+        assertEquals(77L, failed.ruleId)
+        assertEquals("Forward & Delete Rule", failed.ruleName)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, failed.failedActionType)
+        assertTrue(failed.errorMessage.contains("Failed to enqueue WorkManager task"))
+
+        // Error log must be written
+        val errorLogs = autoRepo.getLogsList(AutomationLog.TYPE_ERROR)
+        assertEquals(1, errorLogs.size)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, errorLogs.first().actionType)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 29. AutomationRuleRepositoryImpl Query Realm Reuse (No premature closure)
+    // ────────────────────────────────────────────────────────────────────
+    @Suppress("UNCHECKED_CAST")
+    @Test
+    fun testAutomationRuleRepositoryImpl_reusesActiveQueryRealmWithoutPrematureClosure() {
+        val mockRealm = Mockito.mock(io.realm.Realm::class.java)
+        Mockito.`when`(mockRealm.isClosed).thenReturn(false)
+        val mockQuery = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<AutomationLog>
+        val mockResults = Mockito.mock(io.realm.RealmResults::class.java) as io.realm.RealmResults<AutomationLog>
+
+        Mockito.`when`(mockRealm.where(AutomationLog::class.java)).thenReturn(mockQuery)
+        Mockito.`when`(mockQuery.equalTo(Mockito.anyString(), Mockito.anyString())).thenReturn(mockQuery)
+        Mockito.`when`(mockQuery.sort(Mockito.anyString(), Mockito.any<io.realm.Sort>())).thenReturn(mockQuery)
+        Mockito.`when`(mockQuery.findAllAsync()).thenReturn(mockResults)
+
+        var providerCallCount = 0
+        val repo = AutomationRuleRepositoryImpl {
+            providerCallCount++
+            mockRealm
+        }
+
+        // First call opens the realm
+        val logs1 = repo.getLogs(null)
+        assertNotNull(logs1)
+        assertEquals(1, providerCallCount)
+
+        // Second call with filter must REUSE the open realm, not close it and re-instantiate
+        val logs2 = repo.getLogs("ERROR")
+        assertNotNull(logs2)
+        assertEquals(1, providerCallCount)
+        Mockito.verify(mockRealm, Mockito.never()).close()
+
+        // Calling close() closes the realm
+        repo.close()
+        Mockito.verify(mockRealm, Mockito.times(1)).close()
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 30. AutomationActionWorker Step Exception Preserves Exact Step Index & Action
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testAutomationActionWorker_stepExceptionPreservesExactStepIndexAndActionType() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val messageRepo = FakeMessageRepo().apply {
+            throwOnSend = SecurityException("Carrier permission denied: SEND_SMS")
+        }
+        val convRepo = FakeConvRepo()
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val rule = AutomationRule(
+            id = 501L,
+            name = "Sensitive Rule",
+            enabled = true
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559998888"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+
+        val workId = UUID.randomUUID().toString()
+        val actionsJson = AutomationActionStepSerializer.toJson(rule.getActionSteps())
+        val inputData = androidx.work.Data.Builder()
+            .putLong(ExecuteAutomations.KEY_RULE_ID, rule.id)
+            .putString(ExecuteAutomations.KEY_RULE_NAME, rule.name)
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 8888L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 4444L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "+11223344")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Confidential PIN")
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
+            isAccessible = true
+            set(workerParams, 0)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = convRepo
+        worker.notificationManager = mockNotificationManager
+        worker.automationRepo = autoRepo
+
+        val workerResult = worker.doWork()
+        assertEquals(androidx.work.ListenableWorker.Result.failure(), workerResult)
+
+        // 1. Original message MUST be deleted because chain contains ACTION_DELETE
+        assertTrue("Message must be deleted on step exception when chain contains ACTION_DELETE",
+            messageRepo.deletedMessageIds.contains(8888L))
+
+        // 2. Failed message must record exact step index 0 and action type FORWARD_SMS (not -1 / CHAIN)
+        val failedList = autoRepo.getFailedMessagesList()
+        assertEquals(1, failedList.size)
+        val failed = failedList.first()
+        assertEquals(0, failed.failedStepIndex)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, failed.failedActionType)
+        assertTrue(failed.errorMessage.contains("Carrier permission denied: SEND_SMS"))
+
+        // 3. Error log must record step failure
+        val errorLogs = autoRepo.getLogsList(AutomationLog.TYPE_ERROR)
+        assertEquals(1, errorLogs.size)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, errorLogs.first().actionType)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 31. Realm Migration v18 -> v19 Table and Field Creation
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testQkRealmMigration_v18ToV19CreatesFailedMessageAndAutomationLogTables() {
+        val mockDynamicRealm = Mockito.mock(io.realm.DynamicRealm::class.java)
+        val mockSchema = Mockito.mock(io.realm.RealmSchema::class.java)
+        val mockFailedSchema = Mockito.mock(io.realm.RealmObjectSchema::class.java)
+        val mockLogSchema = Mockito.mock(io.realm.RealmObjectSchema::class.java)
+
+        Mockito.`when`(mockDynamicRealm.schema).thenReturn(mockSchema)
+        Mockito.`when`(mockSchema.create("FailedAutomationMessage")).thenReturn(mockFailedSchema)
+        Mockito.`when`(mockSchema.create("AutomationLog")).thenReturn(mockLogSchema)
+
+        Mockito.`when`(mockFailedSchema.addField(Mockito.anyString(), Mockito.any(), Mockito.anyVararg())).thenReturn(mockFailedSchema)
+        Mockito.`when`(mockLogSchema.addField(Mockito.anyString(), Mockito.any(), Mockito.anyVararg())).thenReturn(mockLogSchema)
+
+        val mockCursor: dev.octoshrimpy.quik.mapper.CursorToContact = Mockito.mock(dev.octoshrimpy.quik.mapper.CursorToContact::class.java)
+        val mockPrefs: dev.octoshrimpy.quik.util.Preferences = Mockito.mock(dev.octoshrimpy.quik.util.Preferences::class.java)
+        val migration = dev.octoshrimpy.quik.migration.QkRealmMigration(mockCursor, mockPrefs)
+        migration.migrate(mockDynamicRealm, 18L, 19L)
+
+        // Verify tables created
+        Mockito.verify(mockSchema).create("FailedAutomationMessage")
+        Mockito.verify(mockSchema).create("AutomationLog")
+
+        // Verify primary key on FailedAutomationMessage
+        Mockito.verify(mockFailedSchema).addField(
+            Mockito.eq("id"),
+            Mockito.eq(Long::class.java),
+            Mockito.eq(io.realm.FieldAttribute.PRIMARY_KEY),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED)
+        )
+
+        // Verify primary key on AutomationLog
+        Mockito.verify(mockLogSchema).addField(
+            Mockito.eq("id"),
+            Mockito.eq(Long::class.java),
+            Mockito.eq(io.realm.FieldAttribute.PRIMARY_KEY),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED)
+        )
     }
 }
 

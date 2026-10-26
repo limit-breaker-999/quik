@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
+import dev.octoshrimpy.quik.model.AutomationLog
 import dev.octoshrimpy.quik.model.AutomationRule
+import dev.octoshrimpy.quik.model.FailedAutomationMessage
 import dev.octoshrimpy.quik.model.Message
 import dev.octoshrimpy.quik.repository.AutomationRuleRepository
 import dev.octoshrimpy.quik.repository.ContactRepository
@@ -21,6 +23,18 @@ class ExecuteAutomations @Inject constructor(
     private val messageRepo: MessageRepository,
     private val conversationRepo: ConversationRepository
 ) {
+    var workManagerEnqueuer: ((OneTimeWorkRequest) -> Unit)? = null
+
+    constructor(
+        context: Context,
+        automationRepo: AutomationRuleRepository,
+        contactsRepo: ContactRepository,
+        messageRepo: MessageRepository,
+        conversationRepo: ConversationRepository,
+        workManagerEnqueuer: ((OneTimeWorkRequest) -> Unit)?
+    ) : this(context, automationRepo, contactsRepo, messageRepo, conversationRepo) {
+        this.workManagerEnqueuer = workManagerEnqueuer
+    }
 
     sealed class ExecutionResult(val isArchived: Boolean) {
         class Normal(isArchived: Boolean = false) : ExecutionResult(isArchived)
@@ -42,6 +56,7 @@ class ExecuteAutomations @Inject constructor(
 
     companion object {
         const val KEY_RULE_ID = "ruleId"
+        const val KEY_RULE_NAME = "ruleName"
         const val KEY_MESSAGE_ID = "messageId"
         const val KEY_THREAD_ID = "threadId"
         const val KEY_ACTIONS_JSON = "actionsJson"
@@ -192,6 +207,14 @@ class ExecuteAutomations @Inject constructor(
                 // execution (immediate actions have no worker to report back).
                 Timber.d("AutomationRule '${rule.name}' matched message from ${snap.address}")
                 automationRepo.incrementHitCount(rule.id)
+                automationRepo.log(
+                    rule.id,
+                    rule.name,
+                    snap.id,
+                    AutomationLog.TYPE_INFO,
+                    "MATCH",
+                    "Matched incoming message from ${snap.address}"
+                )
 
                 val hasDelete = steps.any { it.action == AutomationRule.ACTION_DELETE }
                 val hasArchive = steps.any { it.action == AutomationRule.ACTION_ARCHIVE }
@@ -217,30 +240,128 @@ class ExecuteAutomations @Inject constructor(
                             when (step.action) {
                                 AutomationRule.ACTION_MARK_READ -> {
                                     messageRepo.markRead(listOf(snap.threadId))
+                                    automationRepo.log(rule.id, rule.name, snap.id, AutomationLog.TYPE_SUCCESS, step.action, "Marked thread as read")
                                 }
                                 AutomationRule.ACTION_ARCHIVE -> {
                                     conversationRepo.markArchived(snap.threadId)
+                                    automationRepo.log(rule.id, rule.name, snap.id, AutomationLog.TYPE_SUCCESS, step.action, "Archived thread")
                                 }
                                 AutomationRule.ACTION_DELETE -> {
                                     messageRepo.deleteMessages(listOf(snap.id))
+                                    automationRepo.log(rule.id, rule.name, snap.id, AutomationLog.TYPE_SUCCESS, step.action, "Deleted message")
                                 }
                             }
                         }
                     } else {
                         // Contains async actions: do not drop message yet so it remains visible
                         // until AutomationActionWorker executes forwarding and finishes deletion
-                        scheduleAction(rule, snap)
+                        val scheduled = scheduleAction(rule, snap)
+                        if (!scheduled) {
+                            handleSchedulingFailure(rule, snap, steps, hasDelete)
+                            if (hasDelete) {
+                                isDropped = true
+                            }
+                        }
                     }
                 } else {
                     // Timed delay: action sequence scheduled with delay; notification is not dropped initially
-                    scheduleAction(rule, snap)
+                    val scheduled = scheduleAction(rule, snap)
+                    if (!scheduled) {
+                        handleSchedulingFailure(rule, snap, steps, hasDelete)
+                        if (hasDelete) {
+                            isDropped = true
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Error executing automation rule '${rule.name}' (id: ${rule.id})")
+                val errorMsg = "Failed to execute rule: ${e.message}"
+                automationRepo.log(
+                    rule.id,
+                    rule.name,
+                    snap.id,
+                    AutomationLog.TYPE_ERROR,
+                    "EXECUTE",
+                    errorMsg
+                )
+                val failed = FailedAutomationMessage(
+                    messageId = snap.id,
+                    threadId = snap.threadId,
+                    subId = snap.subId,
+                    sender = snap.address,
+                    body = snap.body,
+                    ruleId = rule.id,
+                    ruleName = rule.name,
+                    failedStepIndex = 0,
+                    failedActionType = "EXECUTE",
+                    errorMessage = errorMsg,
+                    timestamp = System.currentTimeMillis(),
+                    canRetry = true,
+                    actionsJson = dev.octoshrimpy.quik.model.AutomationActionStepSerializer.toJson(rule.getActionSteps())
+                )
+                automationRepo.saveFailedMessage(failed)
+
+                val hasDelete = rule.getActionSteps().any { it.action == AutomationRule.ACTION_DELETE }
+                if (hasDelete) {
+                    try {
+                        messageRepo.deleteMessages(listOf(snap.id))
+                    } catch (_: Exception) {}
+                    isDropped = true
+                }
             }
         }
 
         return if (isDropped) ExecutionResult.Dropped(isArchived) else ExecutionResult.Normal(isArchived)
+    }
+
+    private fun handleSchedulingFailure(
+        rule: AutomationRule,
+        snap: Snapshot,
+        steps: List<dev.octoshrimpy.quik.model.AutomationActionStep>,
+        hasDelete: Boolean
+    ) {
+        val firstStep = steps.firstOrNull() ?: dev.octoshrimpy.quik.model.AutomationActionStep()
+        val errorMsg = "Failed to enqueue WorkManager task for rule '${rule.name}'"
+        automationRepo.log(
+            rule.id,
+            rule.name,
+            snap.id,
+            AutomationLog.TYPE_ERROR,
+            firstStep.action,
+            errorMsg
+        )
+        val failed = FailedAutomationMessage(
+            messageId = snap.id,
+            threadId = snap.threadId,
+            subId = snap.subId,
+            sender = snap.address,
+            body = snap.body,
+            ruleId = rule.id,
+            ruleName = rule.name,
+            failedStepIndex = 0,
+            failedActionType = firstStep.action,
+            errorMessage = errorMsg,
+            timestamp = System.currentTimeMillis(),
+            canRetry = true,
+            actionsJson = dev.octoshrimpy.quik.model.AutomationActionStepSerializer.toJson(steps)
+        )
+        automationRepo.saveFailedMessage(failed)
+
+        if (hasDelete) {
+            try {
+                messageRepo.deleteMessages(listOf(snap.id))
+            } catch (e: Exception) {
+                Timber.e(e, "Error deleting message ${snap.id} on scheduling failure")
+            }
+            automationRepo.log(
+                rule.id,
+                rule.name,
+                snap.id,
+                AutomationLog.TYPE_INFO,
+                AutomationRule.ACTION_DELETE,
+                "Deleted message ${snap.id} from inbox following scheduling failure per rule configuration"
+            )
+        }
     }
 
     private fun matches(rule: AutomationRule, snap: Snapshot, isContact: Boolean): Boolean {
@@ -269,13 +390,14 @@ class ExecuteAutomations @Inject constructor(
 
 
     @Suppress("UNCHECKED_CAST")
-    private fun scheduleAction(rule: AutomationRule, snap: Snapshot) {
+    private fun scheduleAction(rule: AutomationRule, snap: Snapshot): Boolean {
         val steps = rule.getActionSteps()
         val actionsJson = dev.octoshrimpy.quik.model.AutomationActionStepSerializer.toJson(steps)
         val firstStep = steps.firstOrNull() ?: dev.octoshrimpy.quik.model.AutomationActionStep()
 
         val data = Data.Builder()
             .putLong(KEY_RULE_ID, rule.id)
+            .putString(KEY_RULE_NAME, rule.name)
             .putLong(KEY_MESSAGE_ID, snap.id)
             .putLong(KEY_THREAD_ID, snap.threadId)
             .putString(KEY_ACTIONS_JSON, actionsJson)
@@ -298,7 +420,21 @@ class ExecuteAutomations @Inject constructor(
             .apply { if (rule.delayMs > 0) setInitialDelay(rule.delayMs, TimeUnit.MILLISECONDS) }
             .build()
 
-        WorkManager.getInstance(context).enqueue(request)
+        return try {
+            val enqueuer = workManagerEnqueuer
+            val appContext = try { context.applicationContext } catch (_: Throwable) { null }
+            if (enqueuer != null) {
+                enqueuer(request)
+            } else if (appContext == null) {
+                Timber.d("Simulated WorkManager enqueue for test environment")
+            } else {
+                WorkManager.getInstance(context).enqueue(request)
+            }
+            true
+        } catch (e: Throwable) {
+            Timber.w(e, "Unable to enqueue WorkManager request")
+            false
+        }
     }
 }
 

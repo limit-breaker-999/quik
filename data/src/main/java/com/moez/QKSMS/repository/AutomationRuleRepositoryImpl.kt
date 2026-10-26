@@ -1,9 +1,12 @@
 package dev.octoshrimpy.quik.repository
 
+import dev.octoshrimpy.quik.model.AutomationLog
 import dev.octoshrimpy.quik.model.AutomationReplyState
 import dev.octoshrimpy.quik.model.AutomationRule
+import dev.octoshrimpy.quik.model.FailedAutomationMessage
 import io.realm.Realm
 import io.realm.RealmResults
+import io.realm.Sort
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -15,15 +18,11 @@ class AutomationRuleRepositoryImpl(
     constructor() : this({ Realm.getDefaultInstance() })
 
     private var rulesRealm: Realm? = null
+    private var failedMessagesRealm: Realm? = null
+    private var logsRealm: Realm? = null
 
     override fun getRules(): RealmResults<AutomationRule> {
-        try {
-            rulesRealm?.takeIf { !it.isClosed }?.close()
-        } catch (e: Exception) {
-            Timber.w(e, "Error closing previous rules Realm instance")
-        }
-        val realm = realmProvider()
-        rulesRealm = realm
+        val realm = rulesRealm?.takeIf { !it.isClosed } ?: realmProvider().also { rulesRealm = it }
         return realm
             .where(AutomationRule::class.java)
             .findAllAsync()
@@ -36,6 +35,20 @@ class AutomationRuleRepositoryImpl(
             Timber.w(e, "Error closing rules Realm instance")
         } finally {
             rulesRealm = null
+        }
+        try {
+            failedMessagesRealm?.takeIf { !it.isClosed }?.close()
+        } catch (e: Exception) {
+            Timber.w(e, "Error closing failedMessages Realm instance")
+        } finally {
+            failedMessagesRealm = null
+        }
+        try {
+            logsRealm?.takeIf { !it.isClosed }?.close()
+        } catch (e: Exception) {
+            Timber.w(e, "Error closing logs Realm instance")
+        } finally {
+            logsRealm = null
         }
     }
 
@@ -169,6 +182,154 @@ class AutomationRuleRepositoryImpl(
             realm.executeTransaction {
                 val rule = realm.where(AutomationRule::class.java).equalTo("id", id).findFirst()
                 rule?.hitCount = (rule?.hitCount ?: 0) + 1
+            }
+        }
+    }
+
+    override fun getFailedMessages(): RealmResults<FailedAutomationMessage> {
+        val realm = failedMessagesRealm?.takeIf { !it.isClosed } ?: realmProvider().also { failedMessagesRealm = it }
+        return realm
+            .where(FailedAutomationMessage::class.java)
+            .sort("timestamp", Sort.DESCENDING)
+            .findAllAsync()
+    }
+
+    override fun getFailedMessagesList(): List<FailedAutomationMessage> {
+        return realmProvider().use { realm ->
+            realm.where(FailedAutomationMessage::class.java)
+                .sort("timestamp", Sort.DESCENDING)
+                .findAll()
+                .map { realm.copyFromRealm(it) }
+        }
+    }
+
+    override fun saveFailedMessage(failedMessage: FailedAutomationMessage) {
+        try {
+            realmProvider().use { realm ->
+                realm.refresh()
+                realm.executeTransaction { r ->
+                    val id = if (failedMessage.id <= 0L) {
+                        (r.where(FailedAutomationMessage::class.java).max("id")?.toLong() ?: 0L) + 1L
+                    } else {
+                        failedMessage.id
+                    }
+                    val toSave = FailedAutomationMessage(
+                        id = id,
+                        messageId = failedMessage.messageId,
+                        threadId = failedMessage.threadId,
+                        subId = failedMessage.subId,
+                        sender = failedMessage.sender,
+                        body = failedMessage.body,
+                        ruleId = failedMessage.ruleId,
+                        ruleName = failedMessage.ruleName,
+                        failedStepIndex = failedMessage.failedStepIndex,
+                        failedActionType = failedMessage.failedActionType,
+                        errorMessage = failedMessage.errorMessage,
+                        timestamp = if (failedMessage.timestamp > 0L) failedMessage.timestamp else System.currentTimeMillis(),
+                        canRetry = failedMessage.canRetry,
+                        actionsJson = failedMessage.actionsJson
+                    )
+                    r.copyToRealmOrUpdate(toSave)
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to persist failed automation message")
+        }
+    }
+
+    override fun deleteFailedMessage(id: Long) {
+        realmProvider().use { realm ->
+            realm.executeTransaction { r ->
+                r.where(FailedAutomationMessage::class.java)
+                    .equalTo("id", id)
+                    .findAll()
+                    .deleteAllFromRealm()
+            }
+        }
+    }
+
+    override fun clearFailedMessages() {
+        realmProvider().use { realm ->
+            realm.executeTransaction { r ->
+                r.where(FailedAutomationMessage::class.java)
+                    .findAll()
+                    .deleteAllFromRealm()
+            }
+        }
+    }
+
+    override fun getLogs(type: String?): RealmResults<AutomationLog> {
+        val realm = logsRealm?.takeIf { !it.isClosed } ?: realmProvider().also { logsRealm = it }
+        val query = realm.where(AutomationLog::class.java)
+        if (!type.isNullOrBlank()) {
+            query.equalTo("type", type)
+        }
+        return query
+            .sort("timestamp", Sort.DESCENDING)
+            .findAllAsync()
+    }
+
+    override fun getLogsList(type: String?): List<AutomationLog> {
+        return realmProvider().use { realm ->
+            val query = realm.where(AutomationLog::class.java)
+            if (!type.isNullOrBlank()) {
+                query.equalTo("type", type)
+            }
+            query.sort("timestamp", Sort.DESCENDING)
+                .findAll()
+                .map { realm.copyFromRealm(it) }
+        }
+    }
+
+    override fun log(
+        ruleId: Long,
+        ruleName: String,
+        messageId: Long,
+        type: String,
+        actionType: String,
+        details: String
+    ) {
+        try {
+            realmProvider().use { realm ->
+                realm.refresh()
+                realm.executeTransaction { r ->
+                    val id = (r.where(AutomationLog::class.java).max("id")?.toLong() ?: 0L) + 1L
+                    val logEntry = AutomationLog(
+                        id = id,
+                        ruleId = ruleId,
+                        ruleName = ruleName,
+                        messageId = messageId,
+                        type = type,
+                        actionType = actionType,
+                        details = details,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    r.copyToRealmOrUpdate(logEntry)
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to persist automation log")
+        }
+    }
+
+    override fun clearLogs() {
+        realmProvider().use { realm ->
+            realm.executeTransaction { r ->
+                r.where(AutomationLog::class.java)
+                    .findAll()
+                    .deleteAllFromRealm()
+            }
+        }
+    }
+
+    override fun pruneOldLogs(maxAgeDays: Int) {
+        val cutoff = System.currentTimeMillis() - (maxAgeDays.toLong() * 24 * 60 * 60 * 1000)
+        realmProvider().use { realm ->
+            realm.executeTransaction { r ->
+                r.where(AutomationLog::class.java)
+                    .lessThan("timestamp", cutoff)
+                    .findAll()
+                    .deleteAllFromRealm()
             }
         }
     }
