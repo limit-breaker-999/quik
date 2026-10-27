@@ -21,6 +21,36 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import timber.log.Timber
 import javax.inject.Inject
 
+object RadioPacingManager {
+    private val lock = Any()
+    var lastTransmissionTime = 0L
+    var pacingIntervalMs = 2000L
+
+    fun pace() {
+        synchronized(lock) {
+            val now = System.currentTimeMillis()
+            val elapsed = now - lastTransmissionTime
+            if (lastTransmissionTime > 0L && elapsed in 0 until pacingIntervalMs) {
+                val sleepTime = pacingIntervalMs - elapsed
+                if (sleepTime > 0L) {
+                    try {
+                        Thread.sleep(sleepTime)
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                }
+            }
+            lastTransmissionTime = System.currentTimeMillis()
+        }
+    }
+
+    fun reset() {
+        synchronized(lock) {
+            lastTransmissionTime = 0L
+        }
+    }
+}
+
 class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters)
     : Worker(appContext, workerParams) {
 
@@ -39,6 +69,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
         const val KEY_SENDER_ADDRESS = "senderAddress"
         const val KEY_MESSAGE_BODY = "messageBody"
         const val KEY_SUB_ID = "subId"
+        const val KEY_FORWARD_RATE_LIMIT_MS = "forwardRateLimitMs"
 
         // Shared client with explicit timeouts so a slow webhook can't hang the worker
         private val httpClient = OkHttpClient.Builder()
@@ -209,6 +240,58 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                     hasDelete, actionsJson ?: ""
                                 )
                             }
+
+                            // Anti-cascade check: carrier shortcode / alphanumeric / USSD filter
+                            val matchingRule = if (::automationRepo.isInitialized && ruleId > 0) automationRepo.getRule(ruleId) else null
+                            val isWhitelisted = dev.octoshrimpy.quik.interactor.ExecuteAutomations.isSenderWhitelisted(
+                                senderAddress,
+                                listOfNotNull(matchingRule)
+                            )
+                            if (dev.octoshrimpy.quik.interactor.ExecuteAutomations.isCarrierOrShortcode(senderAddress) &&
+                                !isWhitelisted) {
+                                return handleStepFailure(
+                                    workId, index, step.action,
+                                    "Carrier shortcode/alphanumeric sender rejected for automated forwarding: $senderAddress",
+                                    ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
+                                    hasDelete, actionsJson ?: ""
+                                )
+                            }
+
+                            // Anti-cascade check: self-forward loop detection
+                            val ownNumber = dev.octoshrimpy.quik.interactor.ExecuteAutomations.getOwnNumber(applicationContext)
+                            if (dev.octoshrimpy.quik.interactor.ExecuteAutomations.isSelfForwardLoop(messageBody, phone, ownNumber)) {
+                                return handleStepFailure(
+                                    workId, index, step.action,
+                                    "Self-forward loop detected: message body contains target destination or own number",
+                                    ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
+                                    hasDelete, actionsJson ?: ""
+                                )
+                            }
+
+                            // Anti-cascade check: forward cooldown per destination
+                            val forwardLimitMs = inputData.getLong(KEY_FORWARD_RATE_LIMIT_MS, 60000L)
+                            if (::automationRepo.isInitialized && !automationRepo.tryAcquireForwardSlot(phone, forwardLimitMs)) {
+                                return handleStepFailure(
+                                    workId, index, step.action,
+                                    "Forward rate limit exceeded for destination $phone (cooldown: ${forwardLimitMs}ms)",
+                                    ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
+                                    hasDelete, actionsJson ?: ""
+                                )
+                            }
+
+                            // Anti-cascade check: outbound budget manager (cap automated SMS at 20 per 30 minutes)
+                            if (::automationRepo.isInitialized && !automationRepo.checkOutboundBudget(20, 30 * 60 * 1000L)) {
+                                return handleStepFailure(
+                                    workId, index, step.action,
+                                    "Outbound SMS budget exceeded (max 20 per 30 minutes)",
+                                    ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
+                                    hasDelete, actionsJson ?: ""
+                                )
+                            }
+
+                            // Serial Radio Pacing: enforce 2,000ms inter-message interval
+                            RadioPacingManager.pace()
+
                             val appendSender = step.appendSenderToForward
                             val body = if (appendSender) "From: $senderAddress | $messageBody" else messageBody
                             val sent = messageRepo.sendNewMessages(subId, listOf(phone), body, emptyList(), false)
@@ -220,6 +303,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 )
                             }
                             if (::automationRepo.isInitialized) {
+                                automationRepo.recordOutboundSms(phone)
                                 automationRepo.log(
                                     ruleId, ruleName, messageId, AutomationLog.TYPE_SUCCESS,
                                     step.action, "Forwarded SMS to $phone"
@@ -275,6 +359,20 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                     hasDelete, actionsJson ?: ""
                                 )
                             }
+
+                            // Anti-cascade check: outbound budget manager
+                            if (::automationRepo.isInitialized && !automationRepo.checkOutboundBudget(20, 30 * 60 * 1000L)) {
+                                return handleStepFailure(
+                                    workId, index, step.action,
+                                    "Outbound SMS budget exceeded (max 20 per 30 minutes)",
+                                    ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
+                                    hasDelete, actionsJson ?: ""
+                                )
+                            }
+
+                            // Serial Radio Pacing: enforce 2,000ms inter-message interval
+                            RadioPacingManager.pace()
+
                             val body = template.replace("{sender}", senderAddress)
                             val sent = messageRepo.sendNewMessages(subId, listOf(senderAddress), body, emptyList(), false)
                             if (sent.isEmpty()) {
@@ -285,6 +383,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 )
                             }
                             if (::automationRepo.isInitialized) {
+                                automationRepo.recordOutboundSms(senderAddress)
                                 automationRepo.log(
                                     ruleId, ruleName, messageId, AutomationLog.TYPE_SUCCESS,
                                     step.action, "Auto-reply sent to $senderAddress"

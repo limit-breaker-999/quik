@@ -129,9 +129,13 @@ open class MessageRepositoryImpl @Inject constructor(
             .equalTo("id", messageId)
             .findFirst()
 
-    override fun getUnmanagedMessage(messageId: Long) =
+    override fun getUnmanagedMessage(messageId: Long): Message? =
         Realm.getDefaultInstance().use { realm ->
-            getMessage(messageId)?.let(realm::copyFromRealm)
+            realm.refresh()
+            realm.where(Message::class.java)
+                .equalTo("id", messageId)
+                .findFirst()
+                ?.let(realm::copyFromRealm)
         }
 
     override fun getMessages(messageIds: Collection<Long>): RealmResults<Message> =

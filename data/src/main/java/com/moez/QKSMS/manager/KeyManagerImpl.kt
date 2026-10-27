@@ -24,8 +24,14 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class KeyManagerImpl @Inject constructor() : KeyManager {
+class KeyManagerImpl(
+    private val realmProvider: () -> Realm
+) : KeyManager {
 
+    @Inject
+    constructor() : this({ Realm.getDefaultInstance() })
+
+    private val lock = Any()
     private var initialized = false
     private var maxValue: Long = 0
 
@@ -33,23 +39,26 @@ class KeyManagerImpl @Inject constructor() : KeyManager {
      * Should be called when a new sync is being started
      */
     override fun reset() {
-        initialized = true
-        maxValue = 0L
+        synchronized(lock) {
+            initialized = false
+        }
     }
 
     /**
      * Returns a valid ID that can be used to store a new message
      */
     override fun newId(): Long {
-        if (!initialized) {
-            maxValue = Realm.getDefaultInstance().use { realm ->
-                realm.where(Message::class.java).max("id")?.toLong() ?: 0L
+        synchronized(lock) {
+            if (!initialized) {
+                maxValue = realmProvider().use { realm ->
+                    realm.where(Message::class.java).max("id")?.toLong() ?: 0L
+                }
+                initialized = true
             }
-            initialized = true
-        }
 
-        maxValue++
-        return maxValue
+            maxValue++
+            return maxValue
+        }
     }
 
 }

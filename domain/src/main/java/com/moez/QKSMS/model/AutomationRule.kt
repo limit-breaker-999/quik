@@ -1,6 +1,7 @@
 package dev.octoshrimpy.quik.model
 
 import io.realm.RealmObject
+import io.realm.annotations.Index
 import io.realm.annotations.PrimaryKey
 
 open class AutomationRule(
@@ -40,6 +41,11 @@ open class AutomationRule(
 
     // Delay before action fires (millis; 0 = immediate)
     var delayMs: Long = 0L,
+
+    // Priority & Multi-Rule arbitration
+    @Index var priority: Int = 0,
+    var stopOnMatch: Boolean = false,
+    var forwardRateLimitMs: Long = 60000L,
 
     // Metadata
     var createdAt: Long = 0L,

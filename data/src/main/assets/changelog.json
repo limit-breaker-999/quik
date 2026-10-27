@@ -1,5 +1,17 @@
 [
   {
+    "versionCode": 2250,
+    "versionName": "4.5.0",
+    "fixed": [
+      "## What's Changed",
+      "* Multi-rule arbitration with priority sorting and exclusive stop-on-match execution",
+      "* Canonical action plan compiler and atomic message-scoped WorkManager queuing",
+      "* Anti-cascade carrier loop prevention: shortcode filtering, self-forward guards, and outbound SMS budget tracker",
+      "* Thread-safe KeyManager ID generation and Realm C++ instance leak remediation",
+      "* Upgraded Realm schema to v20"
+    ]
+  },
+  {
     "versionCode": 2241,
     "versionName": "4.4.0",
     "fixed": [

@@ -24,6 +24,9 @@ interface AutomationRuleRepository {
      * Used to prevent automated reply loops between two machines.
      */
     fun tryAcquireReplySlot(ruleId: Long, threadId: Long, rateLimitMs: Long): Boolean
+    fun tryAcquireForwardSlot(destination: String, rateLimitMs: Long): Boolean = true
+    fun checkOutboundBudget(maxMessages: Int = 20, windowMs: Long = 30 * 60 * 1000L): Boolean = true
+    fun recordOutboundSms(destination: String) {}
     fun incrementHitCount(id: Long)
 
     // Failed Automation Messages
