@@ -365,6 +365,26 @@ class ExecuteAutomations @Inject constructor(
         val compiledPlan = filteredSteps.sortedWith(compareBy { actionRank(it.action) })
 
         val hasDelete = compiledPlan.any { it.action == AutomationRule.ACTION_DELETE }
+
+        if (hasDelete) {
+            message.pendingSuppression = true
+            try {
+                if (message.isManaged && message.realm != null) {
+                    val r = message.realm
+                    if (r.isInTransaction) {
+                        message.pendingSuppression = true
+                    } else {
+                        r.executeTransaction {
+                            message.pendingSuppression = true
+                        }
+                    }
+                } else {
+                    messageRepo.markPendingSuppression(snap.id)
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to mark message pendingSuppression in Realm")
+            }
+        }
         val hasArchive = compiledPlan.any { it.action == AutomationRule.ACTION_ARCHIVE }
         val hasAsync = compiledPlan.any {
             it.action == AutomationRule.ACTION_FORWARD_SMS ||

@@ -40,7 +40,7 @@ class QkRealmMigration @Inject constructor(
 ) : RealmMigration {
 
     companion object {
-        const val SCHEMA_VERSION: Long = 20
+        const val SCHEMA_VERSION: Long = 21
     }
 
     @SuppressLint("ApplySharedPref")
@@ -397,6 +397,16 @@ class QkRealmMigration @Inject constructor(
                 .addField("id", Long::class.java, FieldAttribute.PRIMARY_KEY, FieldAttribute.REQUIRED)
                 .addField("timestamp", Long::class.java, FieldAttribute.REQUIRED)
                 .addField("destinationPhone", String::class.java, FieldAttribute.REQUIRED)
+
+            version++
+        }
+
+        if (version < newVersion && version == 20L) {
+            realm.schema.get("Message")
+                ?.addField("pendingSuppression", Boolean::class.java, FieldAttribute.REQUIRED, FieldAttribute.INDEXED)
+                ?.transform { obj ->
+                    obj.setBoolean("pendingSuppression", false)
+                }
 
             version++
         }

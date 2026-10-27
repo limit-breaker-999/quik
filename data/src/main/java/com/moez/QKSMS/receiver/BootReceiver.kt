@@ -23,16 +23,36 @@ import android.content.Context
 import android.content.Intent
 import dagger.android.AndroidInjection
 import dev.octoshrimpy.quik.interactor.UpdateScheduledMessageAlarms
+import dev.octoshrimpy.quik.manager.NotificationManager
+import dev.octoshrimpy.quik.repository.MessageRepository
+import dev.octoshrimpy.quik.worker.HousekeepingWorker
+import timber.log.Timber
 import javax.inject.Inject
 
 class BootReceiver : BroadcastReceiver() {
 
     @Inject lateinit var updateScheduledMessageAlarms: UpdateScheduledMessageAlarms
+    @Inject lateinit var messageRepo: MessageRepository
+    @Inject lateinit var notificationManager: NotificationManager
 
     override fun onReceive(context: Context, intent: Intent?) {
         AndroidInjection.inject(this, context)
 
         val result = goAsync()
+
+        try {
+            val threadIds = if (::messageRepo.isInitialized) {
+                messageRepo.resetOrphanedSuppressedMessages(60_000L)
+            } else {
+                HousekeepingWorker.scanAndResetOrphanedSuppressedMessages(60_000L)
+            }
+            if (::notificationManager.isInitialized) {
+                threadIds.forEach { notificationManager.update(it) }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to reset orphaned suppressed messages on boot")
+        }
+
         updateScheduledMessageAlarms.execute(Unit) { result.finish() }
     }
 

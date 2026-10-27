@@ -103,6 +103,7 @@ open class MessageRepositoryImpl @Inject constructor(
             .where(Message::class.java)
             .equalTo("threadId", threadId)
             .equalTo("isEmojiReaction", false)
+            .equalTo("pendingSuppression", false)
             .let {
                 when (query.isEmpty()) {
                     true -> it
@@ -263,6 +264,7 @@ open class MessageRepositoryImpl @Inject constructor(
             .where(Message::class.java)
             .equalTo("seen", false)
             .equalTo("read", false)
+            .equalTo("pendingSuppression", false)
             .equalTo("threadId", threadId)
             .sort("date")
             .findAll()
@@ -271,6 +273,7 @@ open class MessageRepositoryImpl @Inject constructor(
         Realm.getDefaultInstance()
             .where(Message::class.java)
             .equalTo("read", false)
+            .equalTo("pendingSuppression", false)
             .equalTo("threadId", threadId)
             .sort("date")
             .findAll()
@@ -1086,5 +1089,47 @@ open class MessageRepositoryImpl @Inject constructor(
             append(message.attachmentTypeString)
         }
         return sha256(signatureString)
+    }
+
+    override fun resetOrphanedSuppressedMessages(ttlMs: Long): List<Long> {
+        val cutoff = System.currentTimeMillis() - ttlMs
+        val threadIds = mutableSetOf<Long>()
+        try {
+            Realm.getDefaultInstance().use { realm ->
+                val orphaned = realm.where(Message::class.java)
+                    .equalTo("pendingSuppression", true)
+                    .lessThanOrEqualTo("date", cutoff)
+                    .findAll()
+
+                if (orphaned.isNotEmpty()) {
+                    realm.executeTransaction {
+                        orphaned.forEach { msg ->
+                            msg.pendingSuppression = false
+                            threadIds.add(msg.threadId)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Error resetting orphaned suppressed messages")
+        }
+        return threadIds.toList()
+    }
+
+    override fun markPendingSuppression(messageId: Long) {
+        try {
+            Realm.getDefaultInstance().use { realm ->
+                realm.where(Message::class.java)
+                    .equalTo("id", messageId)
+                    .findFirst()
+                    ?.let { msg ->
+                        realm.executeTransaction {
+                            msg.pendingSuppression = true
+                        }
+                    }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Error marking pending suppression for message $messageId")
+        }
     }
 }

@@ -71,6 +71,8 @@ class InjectionWorkerFactory @Inject constructor(
             is HousekeepingWorker -> {
                 instance.scheduledMessageRepository = scheduledMessageRepository
                 instance.automationRepo = automationRepo
+                instance.messageRepo = messageRepo
+                instance.notificationManager = notificationManager
             }
             is ReceiveSmsWorker -> {
                 instance.conversationRepo  = conversationRepo

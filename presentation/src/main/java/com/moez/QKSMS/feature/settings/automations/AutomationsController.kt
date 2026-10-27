@@ -98,6 +98,13 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
         binding.chipFilterSuccess.setOnClickListener { filterLogsSubject.onNext("SUCCESS") }
     }
 
+    override fun onDestroyView(view: View) {
+        adapter.emptyView = null
+        failedAdapter.emptyView = null
+        logsAdapter.emptyView = null
+        super.onDestroyView(view)
+    }
+
     override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
         super.onCreateOptionsMenu(menu, inflater)
         inflater.inflate(R.menu.automations, menu)

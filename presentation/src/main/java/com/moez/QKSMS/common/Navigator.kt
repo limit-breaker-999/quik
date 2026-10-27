@@ -57,6 +57,7 @@ class Navigator @Inject constructor(
 
     fun showCompose(body: String? = null, attachments: List<Uri>? = null, mode: String? = null) {
         val intent = Intent(context, ComposeActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         intent.putExtra(Intent.EXTRA_TEXT, body)
         intent.putExtra("mode", mode)
 
@@ -78,6 +79,7 @@ class Navigator @Inject constructor(
         )
 
         val intent = Intent(context, ComposeActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         intent.putExtra(Intent.EXTRA_TEXT, scheduledMessage.body)
         intent.putExtra("threadId", scheduledThreadId)
         intent.putExtra("subscriptionId", scheduledMessage.subId)
@@ -102,6 +104,7 @@ class Navigator @Inject constructor(
 
     fun showConversation(threadId: Long, query: String? = null) {
         val intent = Intent(context, ComposeActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra("threadId", threadId)
                 .putExtra("query", query)
         startActivity(intent)

@@ -191,18 +191,7 @@ class NotificationManagerImpl @Inject constructor(
                 .setVibrate(if (prefs.vibration(threadId).get()) VIBRATE_PATTERN else longArrayOf(0))
 
         // if preference set to silence notifications if no recipients in contacts
-        if (prefs.silentNotContact.get() && run {
-            val msgRecipientNumbers = conversation.recipients.map { it.address }
-
-            // true if any message recipients are in device's contacts
-            !contactRepo
-                .getUnmanagedAllContacts()
-                .flatMap { it.numbers }
-                .map { it.address }
-                .any { contactNumber ->
-                    msgRecipientNumbers.any { phoneNumberUtils.compare(contactNumber, it) }
-                }
-        })
+        if (prefs.silentNotContact.get() && !conversation.recipients.any { contactRepo.isContact(it.address) })
             notification.setSilent(true)
         else
             notification.setSound(ringtone)

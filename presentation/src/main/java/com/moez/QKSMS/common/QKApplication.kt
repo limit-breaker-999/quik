@@ -22,6 +22,8 @@ import android.app.Activity
 import android.app.Application
 import android.app.Service
 import android.content.BroadcastReceiver
+import android.content.ComponentCallbacks2
+import com.bumptech.glide.Glide
 import androidx.emoji2.bundled.BundledEmojiCompatConfig
 import androidx.emoji2.text.EmojiCompat
 import androidx.work.Configuration
@@ -40,9 +42,11 @@ import dev.octoshrimpy.quik.injection.AppComponentManager
 import dev.octoshrimpy.quik.injection.appComponent
 import dev.octoshrimpy.quik.interactor.SpeakThreads
 import dev.octoshrimpy.quik.manager.BillingManager
+import dev.octoshrimpy.quik.manager.NotificationManager
 import dev.octoshrimpy.quik.manager.ReferralManager
 import dev.octoshrimpy.quik.migration.QkMigration
 import dev.octoshrimpy.quik.migration.QkRealmMigration
+import dev.octoshrimpy.quik.repository.MessageRepository
 import dev.octoshrimpy.quik.util.NightModeManager
 import dev.octoshrimpy.quik.util.Preferences
 import dev.octoshrimpy.quik.worker.HousekeepingWorker
@@ -74,6 +78,8 @@ class QKApplication : Application(), HasActivityInjector, HasBroadcastReceiverIn
     @Inject lateinit var realmMigration: QkRealmMigration
     @Inject lateinit var referralManager: ReferralManager
     @Inject lateinit var workerFactory: WorkerFactory
+    @Inject lateinit var messageRepo: MessageRepository
+    @Inject lateinit var notificationManager: NotificationManager
 
     override fun onCreate() {
         super.onCreate()
@@ -107,6 +113,18 @@ class QKApplication : Application(), HasActivityInjector, HasBroadcastReceiverIn
             referralManager.trackReferrer()
             billingManager.checkForPurchases()
             billingManager.queryProducts()
+            try {
+                val threadIds = if (::messageRepo.isInitialized) {
+                    messageRepo.resetOrphanedSuppressedMessages(60_000L)
+                } else {
+                    HousekeepingWorker.scanAndResetOrphanedSuppressedMessages(60_000L)
+                }
+                if (::notificationManager.isInitialized) {
+                    threadIds.forEach { notificationManager.update(it) }
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to reset orphaned suppressed messages on startup")
+            }
         }
 
         nightModeManager.updateCurrentTheme()
@@ -143,6 +161,50 @@ class QKApplication : Application(), HasActivityInjector, HasBroadcastReceiverIn
 
         // register, or re-register, housekeeping work manager
         HousekeepingWorker.register(applicationContext)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        try {
+            super.onTrimMemory(level)
+        } catch (e: RuntimeException) {
+            // Ignored in unit test environments where android.app.Application is not mocked
+        }
+        try {
+            Glide.get(this).trimMemory(level)
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to trim Glide memory")
+        }
+
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL || level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            try {
+                Realm.getDefaultConfiguration()?.let { config ->
+                    Realm.compactRealm(config)
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to compact Realm on trim memory")
+            }
+        }
+    }
+
+    override fun onLowMemory() {
+        try {
+            super.onLowMemory()
+        } catch (e: RuntimeException) {
+            // Ignored in unit test environments where android.app.Application is not mocked
+        }
+        try {
+            Glide.get(this).clearMemory()
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to clear Glide memory")
+        }
+
+        try {
+            Realm.getDefaultConfiguration()?.let { config ->
+                Realm.compactRealm(config)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to compact Realm on low memory")
+        }
     }
 
     override fun activityInjector(): AndroidInjector<Activity> {
