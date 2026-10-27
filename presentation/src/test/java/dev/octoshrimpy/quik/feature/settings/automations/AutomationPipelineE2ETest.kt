@@ -36,7 +36,13 @@ import org.mockito.ArgumentCaptor
 import org.mockito.Mockito
 import java.util.UUID
 import dev.octoshrimpy.quik.worker.AutomationActionWorker
+import dev.octoshrimpy.quik.worker.RadioPacingManager
 import dev.octoshrimpy.quik.repository.AutomationRuleRepositoryImpl
+import dev.octoshrimpy.quik.manager.KeyManagerImpl
+import java.util.concurrent.Executors
+import java.util.concurrent.Callable
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 
 class AutomationPipelineE2ETest {
 
@@ -67,8 +73,16 @@ class AutomationPipelineE2ETest {
             }
             rules.removeAll { it.id == id }
         }
-        override fun getEnabledRules(): List<AutomationRule> = rules.filter { it.enabled }
+        override fun getEnabledRules(): List<AutomationRule> = rules.filter { it.enabled }.sortedByDescending { it.priority }
         override fun tryAcquireReplySlot(ruleId: Long, threadId: Long, rateLimitMs: Long): Boolean = true
+        var forwardSlotAcquired: Boolean = true
+        var budgetAvailable: Boolean = true
+        val outboundSms = mutableListOf<String>()
+        override fun tryAcquireForwardSlot(destination: String, rateLimitMs: Long): Boolean = forwardSlotAcquired
+        override fun checkOutboundBudget(maxMessages: Int, windowMs: Long): Boolean = budgetAvailable
+        override fun recordOutboundSms(destination: String) {
+            outboundSms.add(destination)
+        }
         override fun incrementHitCount(id: Long) {
             hitCounts[id] = (hitCounts[id] ?: 0L) + 1L
         }
@@ -305,6 +319,9 @@ class AutomationPipelineE2ETest {
             override fun postToMainThread(runnable: Runnable) = runnable.run()
             override fun isMainThread(): Boolean = true
         })
+        RadioPacingManager.reset()
+        RadioPacingManager.pacingIntervalMs = 0L
+        dev.octoshrimpy.quik.interactor.ExecuteAutomations.whitelistedSenders.clear()
     }
 
     @org.junit.After
@@ -313,6 +330,9 @@ class AutomationPipelineE2ETest {
         com.uber.autodispose.android.AutoDisposeAndroidPlugins.reset()
         io.reactivex.plugins.RxJavaPlugins.reset()
         io.reactivex.android.plugins.RxAndroidPlugins.reset()
+        RadioPacingManager.reset()
+        RadioPacingManager.pacingIntervalMs = 2000L
+        dev.octoshrimpy.quik.interactor.ExecuteAutomations.whitelistedSenders.clear()
     }
 
     private fun dummyContext(): Context {
@@ -869,14 +889,37 @@ class AutomationPipelineE2ETest {
         autoRepo.rules.add(asyncForwardDeleteRule)
         messageRepo.deletedMessageIds.clear()
 
-        val msgAsync = createMessage(1002L, 502L, "12345", "ForwardAndDelete incoming OTP")
+        val msgAsync = createMessage(1002L, 502L, "+1234567890", "ForwardAndDelete incoming OTP")
         val resultAsync = interactor.execute(msgAsync)
 
-        // Must NOT be dropped! isDropped = false keeps message visible until worker completes forwarding and deletes
-        assertTrue("Async forward + delete must keep message visible (ExecutionResult.Normal)",
-            resultAsync is ExecuteAutomations.ExecutionResult.Normal)
+        // With Section 7 anti-ghost-notification invariant: isDropped = true upfront when DELETE is in plan
+        assertTrue("Async forward + delete must drop message upfront (ExecutionResult.Dropped)",
+            resultAsync is ExecuteAutomations.ExecutionResult.Dropped)
         assertFalse("Message must NOT be deleted synchronously before forwarding finishes",
             messageRepo.deletedMessageIds.contains(1002L))
+
+        // Case C: Pure forward rule (without delete) keeps message visible
+        val pureForwardRule = AutomationRule(
+            id = 300L,
+            name = "Pure Forward SMS",
+            enabled = true,
+            matchBody = "PureForward",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559876543")
+            ))
+        }
+        autoRepo.rules.clear()
+        autoRepo.rules.add(pureForwardRule)
+
+        val msgPureForward = createMessage(1003L, 503L, "+1234567890", "PureForward incoming OTP")
+        val resultPureForward = interactor.execute(msgPureForward)
+
+        assertTrue("Pure forward without delete must retain ExecutionResult.Normal",
+            resultPureForward is ExecuteAutomations.ExecutionResult.Normal)
+        assertFalse("Message must NOT be deleted synchronously",
+            messageRepo.deletedMessageIds.contains(1003L))
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -1070,9 +1113,9 @@ class AutomationPipelineE2ETest {
 
         // Must match rule (hitCount incremented)
         assertEquals(1L, autoRepo.hitCounts[1L])
-        // Must return Normal (not Dropped) so message remains visible while forward is pending
-        assertTrue("Message with async forward step must return Normal result",
-            result1 is ExecuteAutomations.ExecutionResult.Normal)
+        // Must return Dropped so notification is suppressed upfront while forward is pending
+        assertTrue("Message with async forward + delete step must return Dropped result",
+            result1 is ExecuteAutomations.ExecutionResult.Dropped)
         // Message must NOT be deleted yet by ExecuteAutomations directly
         assertFalse(messageRepo.deletedMessageIds.contains(1001L))
 
@@ -1084,6 +1127,28 @@ class AutomationPipelineE2ETest {
         assertEquals(1L, autoRepo.hitCounts[1L])
         assertTrue(result2 is ExecuteAutomations.ExecutionResult.Normal)
         assertFalse(messageRepo.deletedMessageIds.contains(1002L))
+
+        // Case 3: Pure forward rule (without delete) keeps message visible
+        val pureForwardBankRule = AutomationRule(
+            id = 2L,
+            name = "Forward SMS Only",
+            enabled = true,
+            matchSender = "",
+            matchBody = bankRegex,
+            matchBodyIsRegex = true,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+919876543210")
+            ))
+        }
+        autoRepo.rules.clear()
+        autoRepo.rules.add(pureForwardBankRule)
+        val bankMessage2 = createMessage(1003L, 503L, "VK-HDFCBK", "INR 2,000.00 debited from account XX1234")
+        val result3 = interactor.execute(bankMessage2)
+        assertTrue("Pure forward without delete must return Normal result",
+            result3 is ExecuteAutomations.ExecutionResult.Normal)
+        assertFalse(messageRepo.deletedMessageIds.contains(1003L))
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -1468,8 +1533,8 @@ class AutomationPipelineE2ETest {
 
         // Must match rule and increment hit count
         assertEquals(1L, repo.hitCounts[1L])
-        // Must return Normal so message stays visible until worker runs
-        assertTrue(execResult is ExecuteAutomations.ExecutionResult.Normal)
+        // Must return Dropped upfront because chain contains DELETE with delayMs=0
+        assertTrue(execResult is ExecuteAutomations.ExecutionResult.Dropped)
         assertFalse(messageRepo.deletedMessageIds.contains(9001L))
 
         // Phase 4: Worker executes [FORWARD_SMS, DELETE]
@@ -2193,6 +2258,560 @@ class AutomationPipelineE2ETest {
             Mockito.eq(io.realm.FieldAttribute.REQUIRED)
         )
     }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 32. Multi-rule Evaluation, Deduplication and Canonical Ordering
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testMultiRuleCompilationAndCanonicalActionPlan() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val contactsRepo = FakeContactRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+
+        val interactor = ExecuteAutomations(dummyContext(), autoRepo, contactsRepo, messageRepo, convRepo)
+
+        var capturedWorkName: String? = null
+        var capturedPolicy: androidx.work.ExistingWorkPolicy? = null
+        var capturedRequest: androidx.work.OneTimeWorkRequest? = null
+
+        interactor.uniqueWorkManagerEnqueuer = { name, policy, request ->
+            capturedWorkName = name
+            capturedPolicy = policy
+            capturedRequest = request
+        }
+
+        // Rule 1 (priority = 10): MARK_READ and FORWARD_SMS
+        val rule1 = AutomationRule(
+            id = 1L,
+            name = "Rule Priority 10",
+            enabled = true,
+            priority = 10,
+            matchBody = "Alert",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_MARK_READ),
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15551111222")
+            ))
+        }
+
+        // Rule 2 (priority = 20): FORWARD_HTTP and ARCHIVE
+        val rule2 = AutomationRule(
+            id = 2L,
+            name = "Rule Priority 20",
+            enabled = true,
+            priority = 20,
+            matchBody = "Alert",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_HTTP, forwardToUrl = "https://example.com/webhook"),
+                AutomationActionStep(action = AutomationRule.ACTION_ARCHIVE)
+            ))
+        }
+
+        // Rule 3 (priority = 5): DELETE and duplicate MARK_READ
+        val rule3 = AutomationRule(
+            id = 3L,
+            name = "Rule Priority 5",
+            enabled = true,
+            priority = 5,
+            matchBody = "Alert",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE),
+                AutomationActionStep(action = AutomationRule.ACTION_MARK_READ)
+            ))
+        }
+
+        autoRepo.rules.addAll(listOf(rule1, rule2, rule3))
+
+        val msg = createMessage(9999L, 777L, "+19998887777", "Critical Alert: OTP 9999")
+        val result = interactor.execute(msg)
+
+        // All 3 rules match
+        assertEquals(1L, autoRepo.hitCounts[1L])
+        assertEquals(1L, autoRepo.hitCounts[2L])
+        assertEquals(1L, autoRepo.hitCounts[3L])
+
+        // Plan contains ACTION_DELETE -> upfront suppression (Dropped)
+        // Plan contains ACTION_ARCHIVE -> isArchived = true
+        assertTrue("Multi-rule plan with DELETE must drop message upfront", result is ExecuteAutomations.ExecutionResult.Dropped)
+        assertTrue("Multi-rule plan with ARCHIVE must flag isArchived = true", result.isArchived)
+
+        // Message is NOT deleted synchronously from messageRepo because async steps are scheduled
+        assertFalse(messageRepo.deletedMessageIds.contains(9999L))
+
+        // Unique WorkManager work enqueued with expected name and policy
+        assertEquals("automation_msg_9999", capturedWorkName)
+        assertEquals(androidx.work.ExistingWorkPolicy.KEEP, capturedPolicy)
+        assertNotNull(capturedRequest)
+
+        // Inspect compiled action plan inside WorkRequest input data
+        val actionsJson = capturedRequest!!.workSpec.input.getString(AutomationActionWorker.KEY_ACTIONS_JSON)
+        assertNotNull(actionsJson)
+        val compiledSteps = AutomationActionStepSerializer.fromJson(actionsJson!!)
+
+        // Deduplication and canonical ordering:
+        // HTTP -> SMS -> MARK_READ -> ARCHIVE -> DELETE (duplicate MARK_READ removed)
+        assertEquals(5, compiledSteps.size)
+        assertEquals(AutomationRule.ACTION_FORWARD_HTTP, compiledSteps[0].action)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, compiledSteps[1].action)
+        assertEquals(AutomationRule.ACTION_MARK_READ, compiledSteps[2].action)
+        assertEquals(AutomationRule.ACTION_ARCHIVE, compiledSteps[3].action)
+        assertEquals(AutomationRule.ACTION_DELETE, compiledSteps[4].action)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 33. Precedence Arbitration: stopOnMatch Halts Evaluation
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testStopOnMatchHaltsEvaluationAtHighestPriorityRule() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val contactsRepo = FakeContactRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+
+        val interactor = ExecuteAutomations(dummyContext(), autoRepo, contactsRepo, messageRepo, convRepo)
+
+        // Rule 1 has high priority (100) and stopOnMatch = true
+        val rule1 = AutomationRule(
+            id = 101L,
+            name = "High Priority Rule",
+            enabled = true,
+            priority = 100,
+            stopOnMatch = true,
+            matchBody = "Security",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_MARK_READ)
+            ))
+        }
+
+        // Rule 2 has lower priority (50) and also matches the message
+        val rule2 = AutomationRule(
+            id = 102L,
+            name = "Low Priority Rule",
+            enabled = true,
+            priority = 50,
+            stopOnMatch = false,
+            matchBody = "Security",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_ARCHIVE)
+            ))
+        }
+
+        autoRepo.rules.addAll(listOf(rule1, rule2))
+
+        val msg = createMessage(5555L, 333L, "+19998887777", "Security notification: login")
+        val result = interactor.execute(msg)
+
+        // Rule 1 matched and evaluated
+        assertEquals(1L, autoRepo.hitCounts[101L])
+        // Rule 2 was HALTED due to stopOnMatch on Rule 1
+        assertEquals(null, autoRepo.hitCounts[102L])
+
+        // Local action from Rule 1 executed
+        assertTrue(messageRepo.markedReadThreadIds.contains(333L))
+        // Local action from Rule 2 did NOT execute
+        assertFalse(convRepo.archivedThreadIds.contains(333L))
+
+        assertTrue(result is ExecuteAutomations.ExecutionResult.Normal)
+        assertFalse(result.isArchived)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 34. Anti-Cascade Carrier Loop, Self-Forward and Rate Limit Cooldown
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testAntiCascadeCarrierShortcodeSelfForwardAndCooldown() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val contactsRepo = FakeContactRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+
+        val interactor = ExecuteAutomations(dummyContext(), autoRepo, contactsRepo, messageRepo, convRepo)
+
+        // Subcase A: Carrier shortcode rejection in ExecuteAutomations
+        val forwardRule = AutomationRule(
+            id = 201L,
+            name = "Forward Carrier Rule",
+            enabled = true,
+            matchSender = "",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15551234567")
+            ))
+        }
+        autoRepo.rules.clear()
+        autoRepo.rules.add(forwardRule)
+
+        // Incoming from un-whitelisted shortcode "121"
+        val carrierMsg = createMessage(6001L, 111L, "121", "Your carrier balance is low")
+        val resCarrier = interactor.execute(carrierMsg)
+        // Step filtered out, message remains normal
+        assertTrue(resCarrier is ExecuteAutomations.ExecutionResult.Normal)
+        val logs = autoRepo.getLogsList()
+        assertTrue(logs.any { it.details.contains("Carrier shortcode/alphanumeric sender rejected") })
+
+        // When whitelisted, carrier message passes
+        ExecuteAutomations.whitelistedSenders.add("121")
+        var enqueuedRequest: androidx.work.OneTimeWorkRequest? = null
+        interactor.uniqueWorkManagerEnqueuer = { _, _, req -> enqueuedRequest = req }
+        interactor.execute(carrierMsg)
+        assertNotNull(enqueuedRequest)
+
+        // Subcase B: Self-forward loop detection
+        assertTrue(ExecuteAutomations.isSelfForwardLoop("OTP: 1234 sent to 555-123-4567", "+15551234567", null))
+        assertTrue(ExecuteAutomations.isSelfForwardLoop("Forwarded message. From: +19998887777", "+15551234567", "+19998887777"))
+        assertFalse(ExecuteAutomations.isSelfForwardLoop("Normal SMS message content", "+15551234567", "+19998887777"))
+
+        // Subcase C: Forward rate limit cooldown and outbound budget in AutomationActionWorker
+        val workId = UUID.randomUUID().toString()
+        val actionsJson = AutomationActionStepSerializer.toJson(listOf(
+            AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559998888")
+        ))
+        val inputData = androidx.work.Data.Builder()
+            .putLong(ExecuteAutomations.KEY_RULE_ID, 301L)
+            .putString(ExecuteAutomations.KEY_RULE_NAME, "Worker Rule")
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 7001L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 222L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "+19990001111")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Budget Test Body")
+            .putLong(AutomationActionWorker.KEY_FORWARD_RATE_LIMIT_MS, 60000L)
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
+            isAccessible = true
+            set(workerParams, 0)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = convRepo
+        worker.automationRepo = autoRepo
+        worker.notificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        // 1. Rate limit cooldown rejects forward
+        autoRepo.forwardSlotAcquired = false
+        val rateLimitResult = worker.doWork()
+        assertEquals(androidx.work.ListenableWorker.Result.failure(), rateLimitResult)
+        val failedAfterCooldown = autoRepo.getFailedMessagesList().last()
+        assertTrue(failedAfterCooldown.errorMessage.contains("Forward rate limit exceeded"))
+
+        // 2. Outbound budget manager rejects forward
+        autoRepo.forwardSlotAcquired = true
+        autoRepo.budgetAvailable = false
+        val budgetResult = worker.doWork()
+        assertEquals(androidx.work.ListenableWorker.Result.failure(), budgetResult)
+        val failedAfterBudget = autoRepo.getFailedMessagesList().last()
+        assertTrue(failedAfterBudget.errorMessage.contains("Outbound SMS budget exceeded"))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 35. KeyManager Thread-Safety and Sync Reset Under Heavy Concurrency
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testKeyManagerConcurrentThreadSafety() {
+        var realmQueries = 0
+        val mockRealm = Mockito.mock(io.realm.Realm::class.java)
+        @Suppress("UNCHECKED_CAST")
+        val mockQuery = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<Message>
+
+        Mockito.`when`(mockRealm.where(Message::class.java)).thenAnswer {
+            realmQueries++
+            mockQuery
+        }
+        Mockito.`when`(mockQuery.max("id")).thenReturn(1000L)
+
+        val keyManager = KeyManagerImpl { mockRealm }
+
+        val threadCount = 50
+        val iterationsPerThread = 100
+        val executor = Executors.newFixedThreadPool(16)
+        val generatedIds = ConcurrentHashMap.newKeySet<Long>()
+
+        val tasks = (1..threadCount).map {
+            Callable {
+                for (i in 1..iterationsPerThread) {
+                    val id = keyManager.newId()
+                    generatedIds.add(id)
+                }
+            }
+        }
+
+        val futures = executor.invokeAll(tasks)
+        for (f in futures) {
+            f.get(5, TimeUnit.SECONDS)
+        }
+        executor.shutdown()
+
+        // 50 threads * 100 iterations = 5000 IDs
+        val expectedCount = threadCount * iterationsPerThread
+        assertEquals(expectedCount, generatedIds.size)
+        // Only one Realm query should have initialized the manager
+        assertEquals(1, realmQueries)
+
+        // Test reset()
+        keyManager.reset()
+        Mockito.`when`(mockQuery.max("id")).thenReturn(10000L)
+        val nextId = keyManager.newId()
+        assertEquals(10001L, nextId)
+        assertEquals(2, realmQueries)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 36. Realm Migration v19 -> v20 Fields and Table Creation
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testQkRealmMigration_v19ToV20() {
+        val mockDynamicRealm = Mockito.mock(io.realm.DynamicRealm::class.java)
+        val mockSchema = Mockito.mock(io.realm.RealmSchema::class.java)
+        val mockRuleSchema = Mockito.mock(io.realm.RealmObjectSchema::class.java)
+        val mockTrackerSchema = Mockito.mock(io.realm.RealmObjectSchema::class.java)
+
+        Mockito.`when`(mockDynamicRealm.schema).thenReturn(mockSchema)
+        Mockito.`when`(mockSchema.get("AutomationRule")).thenReturn(mockRuleSchema)
+        Mockito.`when`(mockSchema.create("OutboundSmsTracker")).thenReturn(mockTrackerSchema)
+
+        Mockito.`when`(mockRuleSchema.addField(Mockito.anyString(), Mockito.any(), Mockito.anyVararg())).thenReturn(mockRuleSchema)
+        Mockito.`when`(mockRuleSchema.transform(Mockito.any())).thenReturn(mockRuleSchema)
+        Mockito.`when`(mockTrackerSchema.addField(Mockito.anyString(), Mockito.any(), Mockito.anyVararg())).thenReturn(mockTrackerSchema)
+
+        val mockCursor: dev.octoshrimpy.quik.mapper.CursorToContact = Mockito.mock(dev.octoshrimpy.quik.mapper.CursorToContact::class.java)
+        val mockPrefs: dev.octoshrimpy.quik.util.Preferences = Mockito.mock(dev.octoshrimpy.quik.util.Preferences::class.java)
+        val migration = dev.octoshrimpy.quik.migration.QkRealmMigration(mockCursor, mockPrefs)
+
+        migration.migrate(mockDynamicRealm, 19L, 20L)
+
+        // Verify fields added to AutomationRule
+        Mockito.verify(mockRuleSchema).addField(
+            Mockito.eq("priority"),
+            Mockito.eq(Int::class.java),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED),
+            Mockito.eq(io.realm.FieldAttribute.INDEXED)
+        )
+        Mockito.verify(mockRuleSchema).addField(
+            Mockito.eq("stopOnMatch"),
+            Mockito.eq(Boolean::class.java),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED)
+        )
+        Mockito.verify(mockRuleSchema).addField(
+            Mockito.eq("forwardRateLimitMs"),
+            Mockito.eq(Long::class.java),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED)
+        )
+
+        // Verify OutboundSmsTracker table created
+        Mockito.verify(mockSchema).create("OutboundSmsTracker")
+        Mockito.verify(mockTrackerSchema).addField(
+            Mockito.eq("id"),
+            Mockito.eq(Long::class.java),
+            Mockito.eq(io.realm.FieldAttribute.PRIMARY_KEY),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED)
+        )
+        Mockito.verify(mockTrackerSchema).addField(
+            Mockito.eq("timestamp"),
+            Mockito.eq(Long::class.java),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED)
+        )
+        Mockito.verify(mockTrackerSchema).addField(
+            Mockito.eq("destinationPhone"),
+            Mockito.eq(String::class.java),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED)
+        )
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 37. saveRule Persists Reset priority = 0 and stopOnMatch = false
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testSaveRulePersistsPriorityAndStopOnMatchEvenWhenReset() {
+        val mockRealm = Mockito.mock(io.realm.Realm::class.java)
+        val captor = ArgumentCaptor.forClass(AutomationRule::class.java)
+
+        var currentStoredRule: AutomationRule? = AutomationRule(
+            id = 55L,
+            name = "Existing High Priority Rule",
+            enabled = true,
+            priority = 100,
+            stopOnMatch = true,
+            forwardRateLimitMs = 120000L
+        )
+
+        Mockito.doAnswer { invocation ->
+            val transaction = invocation.arguments[0] as io.realm.Realm.Transaction
+            transaction.execute(mockRealm)
+            null
+        }.`when`(mockRealm).executeTransaction(Mockito.any())
+
+        @Suppress("UNCHECKED_CAST")
+        val query = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<AutomationRule>
+        Mockito.`when`(mockRealm.where(AutomationRule::class.java)).thenReturn(query)
+        Mockito.`when`(query.equalTo("id", 55L)).thenReturn(query)
+        Mockito.`when`(query.findFirst()).thenAnswer { currentStoredRule }
+
+        Mockito.`when`(mockRealm.copyToRealmOrUpdate(captor.capture())).thenAnswer {
+            val saved = it.arguments[0] as AutomationRule
+            currentStoredRule = saved
+            saved
+        }
+
+        val repo = AutomationRuleRepositoryImpl { mockRealm }
+
+        // Update the existing rule: change priority to 0 (default), stopOnMatch to false
+        val updatedRule = AutomationRule(
+            id = 55L,
+            name = "Updated Rule",
+            enabled = true,
+            priority = 0,
+            stopOnMatch = false,
+            forwardRateLimitMs = 60000L
+        )
+
+        repo.saveRule(updatedRule)
+        val saved = captor.value
+        assertEquals(0, saved.priority)
+        assertFalse(saved.stopOnMatch)
+        assertEquals(60000L, saved.forwardRateLimitMs)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 38. RadioPacingManager Enforces Pacing On Immediate Consecutive Calls
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testRadioPacingManagerEnforcesPacingOnZeroElapsedOrBackToBack() {
+        RadioPacingManager.reset()
+        RadioPacingManager.pacingIntervalMs = 60L
+
+        RadioPacingManager.pace()
+        val start = System.currentTimeMillis()
+
+        // Immediate consecutive call (elapsed approx 0ms)
+        RadioPacingManager.pace()
+        val elapsed = System.currentTimeMillis() - start
+
+        assertTrue("Consecutive call must be paced and sleep for at least 50ms, took ${elapsed}ms", elapsed >= 50L)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 39. Multi-Rule Semantic Plan Deduplication With Varying Field Defaults
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testMultiRuleSemanticDeduplicationAcrossVaryingFields() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val contactsRepo = FakeContactRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+
+        val interactor = ExecuteAutomations(dummyContext(), autoRepo, contactsRepo, messageRepo, convRepo)
+
+        var capturedRequest: androidx.work.OneTimeWorkRequest? = null
+        interactor.uniqueWorkManagerEnqueuer = { _, _, req -> capturedRequest = req }
+
+        // Rule 1: DELETE with forwardToPhone empty, MARK_READ
+        val rule1 = AutomationRule(
+            id = 11L,
+            name = "Rule 1",
+            enabled = true,
+            priority = 10,
+            matchBody = "Multi"
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE, forwardToPhone = ""),
+                AutomationActionStep(action = AutomationRule.ACTION_MARK_READ, replyTemplate = "")
+            ))
+        }
+
+        // Rule 2: duplicate DELETE with legacy dummy forwardToPhone, duplicate MARK_READ with replyTemplate, and HTTP
+        val rule2 = AutomationRule(
+            id = 12L,
+            name = "Rule 2",
+            enabled = true,
+            priority = 5,
+            matchBody = "Multi"
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_HTTP, forwardToUrl = "https://example.com/log"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE, forwardToPhone = "+15559999999"),
+                AutomationActionStep(action = AutomationRule.ACTION_MARK_READ, replyTemplate = "dummy template")
+            ))
+        }
+
+        autoRepo.rules.addAll(listOf(rule1, rule2))
+
+        val msg = createMessage(8801L, 444L, "+19991112222", "Multi step deduplication test")
+        interactor.execute(msg)
+
+        assertNotNull(capturedRequest)
+        val actionsJson = capturedRequest!!.workSpec.input.getString(AutomationActionWorker.KEY_ACTIONS_JSON)
+        assertNotNull(actionsJson)
+        val compiledSteps = AutomationActionStepSerializer.fromJson(actionsJson!!)
+
+        // Must contain exactly: 1 HTTP, 1 MARK_READ, 1 DELETE (no duplicate DELETE or MARK_READ)
+        assertEquals(3, compiledSteps.size)
+        assertEquals(AutomationRule.ACTION_FORWARD_HTTP, compiledSteps[0].action)
+        assertEquals(AutomationRule.ACTION_MARK_READ, compiledSteps[1].action)
+        assertEquals(AutomationRule.ACTION_DELETE, compiledSteps[2].action)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 40. tryAcquireForwardSlot Normalizes Phone Number Formatting
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testForwardSlotNormalizedPhoneNumberKeys() {
+        val mockRealm = Mockito.mock(io.realm.Realm::class.java)
+        var storedState: dev.octoshrimpy.quik.model.AutomationReplyState? = null
+
+        Mockito.doAnswer { invocation ->
+            val transaction = invocation.arguments[0] as io.realm.Realm.Transaction
+            transaction.execute(mockRealm)
+            null
+        }.`when`(mockRealm).executeTransaction(Mockito.any())
+
+        @Suppress("UNCHECKED_CAST")
+        val query = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<dev.octoshrimpy.quik.model.AutomationReplyState>
+        Mockito.`when`(mockRealm.where(dev.octoshrimpy.quik.model.AutomationReplyState::class.java)).thenReturn(query)
+        Mockito.`when`(query.equalTo(Mockito.eq("id"), Mockito.anyString())).thenReturn(query)
+        Mockito.`when`(query.findFirst()).thenAnswer { storedState }
+
+        Mockito.`when`(mockRealm.createObject(Mockito.eq(dev.octoshrimpy.quik.model.AutomationReplyState::class.java), Mockito.any())).thenAnswer {
+            val key = it.arguments[1] as String
+            val state = dev.octoshrimpy.quik.model.AutomationReplyState(id = key, lastReplyAt = System.currentTimeMillis())
+            storedState = state
+            state
+        }
+
+        val repo = AutomationRuleRepositoryImpl { mockRealm }
+
+        // Acquire with formatted phone number
+        val firstAcquired = repo.tryAcquireForwardSlot("+1 (555) 123-4567", 60000L)
+        assertTrue(firstAcquired)
+        assertNotNull(storedState)
+        assertEquals("forward:+15551234567", storedState!!.id)
+
+        // Immediately try to acquire with same phone number formatted differently
+        val secondAcquired = repo.tryAcquireForwardSlot("+1-555-123-4567", 60000L)
+        assertFalse("Must be rate limited for identical destination phone regardless of punctuation/formatting", secondAcquired)
+    }
 }
+
 
 

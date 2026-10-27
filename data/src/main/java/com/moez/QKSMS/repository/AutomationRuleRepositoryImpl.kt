@@ -4,6 +4,7 @@ import dev.octoshrimpy.quik.model.AutomationLog
 import dev.octoshrimpy.quik.model.AutomationReplyState
 import dev.octoshrimpy.quik.model.AutomationRule
 import dev.octoshrimpy.quik.model.FailedAutomationMessage
+import dev.octoshrimpy.quik.model.OutboundSmsTracker
 import io.realm.Realm
 import io.realm.RealmResults
 import io.realm.Sort
@@ -86,6 +87,61 @@ class AutomationRuleRepositoryImpl(
         }
     }
 
+    override fun tryAcquireForwardSlot(destination: String, rateLimitMs: Long): Boolean {
+        val now = System.currentTimeMillis()
+        val normalizedDest = destination.filter { it.isDigit() || it == '+' }
+        val key = "forward:${if (normalizedDest.isNotEmpty()) normalizedDest else destination.trim()}"
+        return realmProvider().use { realm ->
+            var acquired = false
+            realm.executeTransaction { r ->
+                val state = r.where(AutomationReplyState::class.java)
+                    .equalTo("id", key)
+                    .findFirst()
+
+                if (rateLimitMs > 0 && state != null && now - state.lastReplyAt < rateLimitMs) {
+                    acquired = false
+                } else {
+                    val s = state ?: r.createObject(AutomationReplyState::class.java, key)
+                    s.lastReplyAt = now
+                    acquired = true
+                }
+            }
+            acquired
+        }
+    }
+
+    override fun checkOutboundBudget(maxMessages: Int, windowMs: Long): Boolean {
+        val cutoff = System.currentTimeMillis() - windowMs
+        return realmProvider().use { realm ->
+            val count = realm.where(OutboundSmsTracker::class.java)
+                .greaterThanOrEqualTo("timestamp", cutoff)
+                .count()
+            count < maxMessages
+        }
+    }
+
+    override fun recordOutboundSms(destination: String) {
+        try {
+            realmProvider().use { realm ->
+                realm.executeTransaction { r ->
+                    // Prune records older than 24 hours to keep the table compact
+                    val pruneCutoff = System.currentTimeMillis() - 86400000L
+                    r.where(OutboundSmsTracker::class.java)
+                        .lessThan("timestamp", pruneCutoff)
+                        .findAll()
+                        .deleteAllFromRealm()
+
+                    val id = (r.where(OutboundSmsTracker::class.java).max("id")?.toLong() ?: 0L) + 1L
+                    val tracker = r.createObject(OutboundSmsTracker::class.java, id)
+                    tracker.timestamp = System.currentTimeMillis()
+                    tracker.destinationPhone = destination.trim()
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to record outbound SMS in OutboundSmsTracker")
+        }
+    }
+
     override fun saveRule(rule: AutomationRule) {
         realmProvider().use { realm ->
             realm.refresh()
@@ -129,6 +185,10 @@ class AutomationRuleRepositoryImpl(
                     else -> 0L
                 }
 
+                val priorityToSave = rule.priority
+                val stopOnMatchToSave = rule.stopOnMatch
+                val forwardRateLimitMsToSave = if (rule.forwardRateLimitMs > 0L) rule.forwardRateLimitMs else (existing?.forwardRateLimitMs ?: 60000L)
+
                 realm.copyToRealmOrUpdate(
                     AutomationRule(
                         id = id,
@@ -149,6 +209,9 @@ class AutomationRuleRepositoryImpl(
                         replyTemplate = replyTemplateToSave,
                         replyRateLimitMs = rule.replyRateLimitMs,
                         delayMs = rule.delayMs,
+                        priority = priorityToSave,
+                        stopOnMatch = stopOnMatchToSave,
+                        forwardRateLimitMs = forwardRateLimitMsToSave,
                         createdAt = createdAtToSave,
                         hitCount = hitCountToSave
                     )
@@ -172,6 +235,7 @@ class AutomationRuleRepositoryImpl(
         return realmProvider().use { realm ->
             realm.where(AutomationRule::class.java)
                 .equalTo("enabled", true)
+                .sort("priority", Sort.DESCENDING)
                 .findAll()
                 .map { realm.copyFromRealm(it) }
         }
@@ -327,6 +391,11 @@ class AutomationRuleRepositoryImpl(
         realmProvider().use { realm ->
             realm.executeTransaction { r ->
                 r.where(AutomationLog::class.java)
+                    .lessThan("timestamp", cutoff)
+                    .findAll()
+                    .deleteAllFromRealm()
+
+                r.where(OutboundSmsTracker::class.java)
                     .lessThan("timestamp", cutoff)
                     .findAll()
                     .deleteAllFromRealm()

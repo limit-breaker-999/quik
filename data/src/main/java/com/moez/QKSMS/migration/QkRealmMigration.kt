@@ -40,7 +40,7 @@ class QkRealmMigration @Inject constructor(
 ) : RealmMigration {
 
     companion object {
-        const val SCHEMA_VERSION: Long = 19
+        const val SCHEMA_VERSION: Long = 20
     }
 
     @SuppressLint("ApplySharedPref")
@@ -382,7 +382,26 @@ class QkRealmMigration @Inject constructor(
             version++
         }
 
-        check(version >= SCHEMA_VERSION) {
+        if (version < newVersion && version == 19L) {
+            realm.schema.get("AutomationRule")
+                ?.addField("priority", Int::class.java, FieldAttribute.REQUIRED, FieldAttribute.INDEXED)
+                ?.addField("stopOnMatch", Boolean::class.java, FieldAttribute.REQUIRED)
+                ?.addField("forwardRateLimitMs", Long::class.java, FieldAttribute.REQUIRED)
+                ?.transform { obj ->
+                    obj.setInt("priority", 0)
+                    obj.setBoolean("stopOnMatch", false)
+                    obj.setLong("forwardRateLimitMs", 60000L)
+                }
+
+            realm.schema.create("OutboundSmsTracker")
+                .addField("id", Long::class.java, FieldAttribute.PRIMARY_KEY, FieldAttribute.REQUIRED)
+                .addField("timestamp", Long::class.java, FieldAttribute.REQUIRED)
+                .addField("destinationPhone", String::class.java, FieldAttribute.REQUIRED)
+
+            version++
+        }
+
+        check(version >= newVersion.coerceAtMost(SCHEMA_VERSION)) {
             "Migration from v$oldVersion to v$newVersion failed at v$version"
         }
 

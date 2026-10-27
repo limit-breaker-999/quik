@@ -2,8 +2,11 @@ package dev.octoshrimpy.quik.interactor
 
 import android.content.Context
 import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
+import dev.octoshrimpy.quik.model.AutomationActionStep
+import dev.octoshrimpy.quik.model.AutomationActionStepSerializer
 import dev.octoshrimpy.quik.model.AutomationLog
 import dev.octoshrimpy.quik.model.AutomationRule
 import dev.octoshrimpy.quik.model.FailedAutomationMessage
@@ -24,6 +27,7 @@ class ExecuteAutomations @Inject constructor(
     private val conversationRepo: ConversationRepository
 ) {
     var workManagerEnqueuer: ((OneTimeWorkRequest) -> Unit)? = null
+    var uniqueWorkManagerEnqueuer: ((String, ExistingWorkPolicy, OneTimeWorkRequest) -> Unit)? = null
 
     constructor(
         context: Context,
@@ -68,6 +72,70 @@ class ExecuteAutomations @Inject constructor(
         const val KEY_SENDER_ADDRESS = "senderAddress"
         const val KEY_MESSAGE_BODY = "messageBody"
         const val KEY_SUB_ID = "subId"
+        const val KEY_FORWARD_RATE_LIMIT_MS = "forwardRateLimitMs"
+        val whitelistedSenders = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+        fun isCarrierOrShortcode(address: String): Boolean {
+            val trimmed = address.trim()
+            if (trimmed.isEmpty()) return false
+            if (trimmed.startsWith("*") || trimmed.endsWith("#") || trimmed.contains("#")) return true
+            val isE164 = trimmed.startsWith("+") && trimmed.filter { it.isDigit() }.length >= 7
+            if (!isE164 && trimmed.length <= 6) return true
+            val lower = trimmed.lowercase()
+            if (lower in listOf("carrier", "operator", "balance", "ussd", "smsc", "verizon", "vodafone", "t-mobile", "airtel", "jio", "att", "telecom", "sprint")) return true
+            return false
+        }
+
+        fun isSenderWhitelisted(address: String, rules: List<AutomationRule> = emptyList()): Boolean {
+            if (whitelistedSenders.contains(address)) return true
+            for (rule in rules) {
+                val pattern = rule.matchSender.trim()
+                if (pattern.isNotBlank() && pattern != ".*" && pattern != ".+") {
+                    if (rule.matchSenderIsRegex) {
+                        if (safeRegexMatch(rule.matchSender, rule.matchSenderCaseSensitive, address)) return true
+                    } else if (address.equals(pattern, ignoreCase = !rule.matchSenderCaseSensitive) || comparePhoneNumbers(pattern, address)) {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
+        fun isSelfForwardLoop(body: String, targetPhone: String, ownNumber: String? = null): Boolean {
+            val bodyDigits = body.filter { it.isDigit() }
+            if (targetPhone.isNotBlank()) {
+                val cleanTarget = targetPhone.filter { it.isDigit() }
+                if (body.contains(targetPhone, ignoreCase = true)) return true
+                if (cleanTarget.length >= 7 && bodyDigits.contains(cleanTarget)) return true
+                if (cleanTarget.length >= 10 && bodyDigits.contains(cleanTarget.takeLast(10))) return true
+            }
+            if (!ownNumber.isNullOrBlank()) {
+                val cleanOwn = ownNumber.filter { it.isDigit() }
+                if (body.contains("From: $ownNumber", ignoreCase = true)) return true
+                if (cleanOwn.length >= 7 && (body.contains("From: $cleanOwn") || bodyDigits.contains(cleanOwn))) return true
+                if (cleanOwn.length >= 10 && bodyDigits.contains(cleanOwn.takeLast(10))) return true
+            }
+            return false
+        }
+
+        fun getOwnNumber(context: Context): String? {
+            return try {
+                val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+                tm?.line1Number?.takeIf { it.isNotBlank() }
+            } catch (_: Throwable) {
+                null
+            }
+        }
+
+        fun actionRank(action: String): Int = when (action) {
+            AutomationRule.ACTION_FORWARD_HTTP -> 1
+            AutomationRule.ACTION_FORWARD_SMS -> 2
+            AutomationRule.ACTION_AUTO_REPLY -> 3
+            AutomationRule.ACTION_MARK_READ -> 4
+            AutomationRule.ACTION_ARCHIVE -> 5
+            AutomationRule.ACTION_DELETE -> 6
+            else -> 7
+        }
         // Bounded daemon thread pool so stuck regex evaluations do not wedge subsequent matches or cause OOM (BUG-031)
         private val REGEX_EXECUTOR = java.util.concurrent.ThreadPoolExecutor(
             1, 4, 30L, java.util.concurrent.TimeUnit.SECONDS,
@@ -171,7 +239,7 @@ class ExecuteAutomations @Inject constructor(
     )
 
     fun execute(message: Message): ExecutionResult {
-        val rules = automationRepo.getEnabledRules()
+        val rules = automationRepo.getEnabledRules().sortedByDescending { it.priority }
         if (rules.isEmpty()) return ExecutionResult.Normal(false)
 
         // Copy all needed fields off the managed object before any rule runs
@@ -184,8 +252,7 @@ class ExecuteAutomations @Inject constructor(
         )
 
         val isContact = contactsRepo.isContact(snap.address)
-        var isDropped = false
-        var isArchived = false
+        val matchedRules = mutableListOf<AutomationRule>()
 
         for (rule in rules) {
             try {
@@ -216,69 +283,173 @@ class ExecuteAutomations @Inject constructor(
                     "Matched incoming message from ${snap.address}"
                 )
 
-                val hasDelete = steps.any { it.action == AutomationRule.ACTION_DELETE }
-                val hasArchive = steps.any { it.action == AutomationRule.ACTION_ARCHIVE }
-                val hasAsync = steps.any {
-                    it.action == AutomationRule.ACTION_FORWARD_SMS ||
-                    it.action == AutomationRule.ACTION_FORWARD_HTTP ||
-                    it.action == AutomationRule.ACTION_AUTO_REPLY
-                }
+                matchedRules.add(rule)
 
-                if (hasArchive) {
-                    isArchived = true
-                }
-
-                if (rule.delayMs == 0L) {
-                    if (!hasAsync) {
-                        // Instant suppression: pure local delete drops message & notification immediately
-                        if (hasDelete) {
-                            isDropped = true
-                        }
-
-                        // Execute local database operations in sequence immediately
-                        for (step in steps) {
-                            when (step.action) {
-                                AutomationRule.ACTION_MARK_READ -> {
-                                    messageRepo.markRead(listOf(snap.threadId))
-                                    automationRepo.log(rule.id, rule.name, snap.id, AutomationLog.TYPE_SUCCESS, step.action, "Marked thread as read")
-                                }
-                                AutomationRule.ACTION_ARCHIVE -> {
-                                    conversationRepo.markArchived(snap.threadId)
-                                    automationRepo.log(rule.id, rule.name, snap.id, AutomationLog.TYPE_SUCCESS, step.action, "Archived thread")
-                                }
-                                AutomationRule.ACTION_DELETE -> {
-                                    messageRepo.deleteMessages(listOf(snap.id))
-                                    automationRepo.log(rule.id, rule.name, snap.id, AutomationLog.TYPE_SUCCESS, step.action, "Deleted message")
-                                }
-                            }
-                        }
-                    } else {
-                        // Contains async actions: do not drop message yet so it remains visible
-                        // until AutomationActionWorker executes forwarding and finishes deletion
-                        val scheduled = scheduleAction(rule, snap)
-                        if (!scheduled) {
-                            handleSchedulingFailure(rule, snap, steps, hasDelete)
-                            if (hasDelete) {
-                                isDropped = true
-                            }
-                        }
-                    }
-                } else {
-                    // Timed delay: action sequence scheduled with delay; notification is not dropped initially
-                    val scheduled = scheduleAction(rule, snap)
-                    if (!scheduled) {
-                        handleSchedulingFailure(rule, snap, steps, hasDelete)
-                        if (hasDelete) {
-                            isDropped = true
-                        }
-                    }
+                if (rule.stopOnMatch) {
+                    Timber.d("Rule '${rule.name}' has stopOnMatch = true, halting further rule evaluation")
+                    break
                 }
             } catch (e: Exception) {
-                Timber.e(e, "Error executing automation rule '${rule.name}' (id: ${rule.id})")
-                val errorMsg = "Failed to execute rule: ${e.message}"
+                Timber.e(e, "Error matching automation rule '${rule.name}' (id: ${rule.id})")
+                val errorMsg = "Failed to match rule: ${e.message}"
                 automationRepo.log(
                     rule.id,
                     rule.name,
+                    snap.id,
+                    AutomationLog.TYPE_ERROR,
+                    "MATCH",
+                    errorMsg
+                )
+            }
+        }
+
+        if (matchedRules.isEmpty()) return ExecutionResult.Normal(false)
+
+        val primaryRule = matchedRules.first()
+        val allSteps = matchedRules.flatMap { it.getActionSteps() }
+
+        // Deduplicate actions semantically so duplicate thread mutations or deletions across rules are merged
+        val deduplicatedSteps = mutableListOf<AutomationActionStep>()
+        val seenKeys = mutableSetOf<String>()
+        for (step in allSteps) {
+            val key = when (step.action) {
+                AutomationRule.ACTION_MARK_READ -> "MARK_READ"
+                AutomationRule.ACTION_ARCHIVE -> "ARCHIVE"
+                AutomationRule.ACTION_DELETE -> "DELETE"
+                AutomationRule.ACTION_FORWARD_SMS -> "FORWARD_SMS:${step.forwardToPhone.filter { it.isDigit() || it == '+' }}"
+                AutomationRule.ACTION_FORWARD_HTTP -> "FORWARD_HTTP:${step.forwardToUrl.trim()}"
+                AutomationRule.ACTION_AUTO_REPLY -> "AUTO_REPLY:${step.replyTemplate.trim()}"
+                else -> "${step.action}:${step.forwardToPhone}:${step.forwardToUrl}:${step.replyTemplate}"
+            }
+            if (seenKeys.add(key)) {
+                val cleanStep = when (step.action) {
+                    AutomationRule.ACTION_MARK_READ -> AutomationActionStep(action = AutomationRule.ACTION_MARK_READ)
+                    AutomationRule.ACTION_ARCHIVE -> AutomationActionStep(action = AutomationRule.ACTION_ARCHIVE)
+                    AutomationRule.ACTION_DELETE -> AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+                    else -> step
+                }
+                deduplicatedSteps.add(cleanStep)
+            }
+        }
+
+        // Anti-cascade checks on automated forwards
+        val ownNumber = getOwnNumber(context)
+        val filteredSteps = deduplicatedSteps.filterNot { step ->
+            if (step.action == AutomationRule.ACTION_FORWARD_SMS) {
+                if (isCarrierOrShortcode(snap.address)) {
+                    if (isSenderWhitelisted(snap.address, matchedRules)) {
+                        whitelistedSenders.add(snap.address)
+                    } else {
+                        automationRepo.log(
+                            primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_INFO,
+                            step.action, "Carrier shortcode/alphanumeric sender rejected for automated forwarding: ${snap.address}"
+                        )
+                        return@filterNot true
+                    }
+                }
+                if (isSelfForwardLoop(snap.body, step.forwardToPhone, ownNumber)) {
+                    automationRepo.log(
+                        primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_INFO,
+                        step.action, "Self-forward loop detected for target ${step.forwardToPhone}, aborting forward"
+                    )
+                    return@filterNot true
+                }
+            }
+            false
+        }
+
+        if (filteredSteps.isEmpty()) return ExecutionResult.Normal(false)
+
+        // Compile unified plan strictly adhering to canonical order:
+        // Egress (HTTP, SMS, AUTO_REPLY) -> Thread Mutations (MARK_READ, ARCHIVE) -> Terminal Action (DELETE)
+        val compiledPlan = filteredSteps.sortedWith(compareBy { actionRank(it.action) })
+
+        val hasDelete = compiledPlan.any { it.action == AutomationRule.ACTION_DELETE }
+        val hasArchive = compiledPlan.any { it.action == AutomationRule.ACTION_ARCHIVE }
+        val hasAsync = compiledPlan.any {
+            it.action == AutomationRule.ACTION_FORWARD_SMS ||
+            it.action == AutomationRule.ACTION_FORWARD_HTTP ||
+            it.action == AutomationRule.ACTION_AUTO_REPLY
+        }
+
+        var isDropped = false
+        var isArchived = false
+
+        if (hasArchive) {
+            isArchived = true
+        }
+
+        val minDelayMs = matchedRules.map { it.delayMs }.minOrNull() ?: 0L
+
+        // Immediate Notification Suppression: If compiled plan contains ACTION_DELETE and delay is 0,
+        // set isDropped = true upfront so no notification or sound leaks to the user.
+        // If minDelayMs > 0, notification surfaces normally for the delay duration before deletion.
+        if (hasDelete && minDelayMs == 0L) {
+            isDropped = true
+        }
+
+        if (!hasAsync && minDelayMs == 0L) {
+            // Execute local database operations in sequence immediately with per-step fault tolerance
+            for ((index, step) in compiledPlan.withIndex()) {
+                try {
+                    when (step.action) {
+                        AutomationRule.ACTION_MARK_READ -> {
+                            messageRepo.markRead(listOf(snap.threadId))
+                            automationRepo.log(primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_SUCCESS, step.action, "Marked thread as read")
+                        }
+                        AutomationRule.ACTION_ARCHIVE -> {
+                            conversationRepo.markArchived(snap.threadId)
+                            automationRepo.log(primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_SUCCESS, step.action, "Archived thread")
+                        }
+                        AutomationRule.ACTION_DELETE -> {
+                            messageRepo.deleteMessages(listOf(snap.id))
+                            automationRepo.log(primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_SUCCESS, step.action, "Deleted message")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Error executing local step ${step.action} for rule '${primaryRule.name}' (id: ${primaryRule.id})")
+                    val errorMsg = "Local step ${step.action} failed: ${e.message}"
+                    automationRepo.log(
+                        primaryRule.id,
+                        primaryRule.name,
+                        snap.id,
+                        AutomationLog.TYPE_ERROR,
+                        step.action,
+                        errorMsg
+                    )
+                    val failed = FailedAutomationMessage(
+                        messageId = snap.id,
+                        threadId = snap.threadId,
+                        subId = snap.subId,
+                        sender = snap.address,
+                        body = snap.body,
+                        ruleId = primaryRule.id,
+                        ruleName = primaryRule.name,
+                        failedStepIndex = index,
+                        failedActionType = step.action,
+                        errorMessage = errorMsg,
+                        timestamp = System.currentTimeMillis(),
+                        canRetry = false,
+                        actionsJson = AutomationActionStepSerializer.toJson(compiledPlan)
+                    )
+                    automationRepo.saveFailedMessage(failed)
+                }
+            }
+        } else {
+            try {
+                val scheduled = scheduleAction(primaryRule, snap, compiledPlan, minDelayMs)
+                if (!scheduled) {
+                    handleSchedulingFailure(primaryRule, snap, compiledPlan, hasDelete)
+                    if (hasDelete) {
+                        isDropped = true
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error executing automation plan for rule '${primaryRule.name}' (id: ${primaryRule.id})")
+                val errorMsg = "Failed to execute plan: ${e.message}"
+                automationRepo.log(
+                    primaryRule.id,
+                    primaryRule.name,
                     snap.id,
                     AutomationLog.TYPE_ERROR,
                     "EXECUTE",
@@ -290,18 +461,17 @@ class ExecuteAutomations @Inject constructor(
                     subId = snap.subId,
                     sender = snap.address,
                     body = snap.body,
-                    ruleId = rule.id,
-                    ruleName = rule.name,
+                    ruleId = primaryRule.id,
+                    ruleName = primaryRule.name,
                     failedStepIndex = 0,
                     failedActionType = "EXECUTE",
                     errorMessage = errorMsg,
                     timestamp = System.currentTimeMillis(),
                     canRetry = true,
-                    actionsJson = dev.octoshrimpy.quik.model.AutomationActionStepSerializer.toJson(rule.getActionSteps())
+                    actionsJson = AutomationActionStepSerializer.toJson(compiledPlan)
                 )
                 automationRepo.saveFailedMessage(failed)
 
-                val hasDelete = rule.getActionSteps().any { it.action == AutomationRule.ACTION_DELETE }
                 if (hasDelete) {
                     try {
                         messageRepo.deleteMessages(listOf(snap.id))
@@ -317,10 +487,10 @@ class ExecuteAutomations @Inject constructor(
     private fun handleSchedulingFailure(
         rule: AutomationRule,
         snap: Snapshot,
-        steps: List<dev.octoshrimpy.quik.model.AutomationActionStep>,
+        steps: List<AutomationActionStep>,
         hasDelete: Boolean
     ) {
-        val firstStep = steps.firstOrNull() ?: dev.octoshrimpy.quik.model.AutomationActionStep()
+        val firstStep = steps.firstOrNull() ?: AutomationActionStep()
         val errorMsg = "Failed to enqueue WorkManager task for rule '${rule.name}'"
         automationRepo.log(
             rule.id,
@@ -343,7 +513,7 @@ class ExecuteAutomations @Inject constructor(
             errorMessage = errorMsg,
             timestamp = System.currentTimeMillis(),
             canRetry = true,
-            actionsJson = dev.octoshrimpy.quik.model.AutomationActionStepSerializer.toJson(steps)
+            actionsJson = AutomationActionStepSerializer.toJson(steps)
         )
         automationRepo.saveFailedMessage(failed)
 
@@ -388,12 +558,15 @@ class ExecuteAutomations @Inject constructor(
         }
     }
 
-
     @Suppress("UNCHECKED_CAST")
-    private fun scheduleAction(rule: AutomationRule, snap: Snapshot): Boolean {
-        val steps = rule.getActionSteps()
-        val actionsJson = dev.octoshrimpy.quik.model.AutomationActionStepSerializer.toJson(steps)
-        val firstStep = steps.firstOrNull() ?: dev.octoshrimpy.quik.model.AutomationActionStep()
+    private fun scheduleAction(
+        rule: AutomationRule,
+        snap: Snapshot,
+        steps: List<AutomationActionStep> = rule.getActionSteps(),
+        delayMs: Long = rule.delayMs
+    ): Boolean {
+        val actionsJson = AutomationActionStepSerializer.toJson(steps)
+        val firstStep = steps.firstOrNull() ?: AutomationActionStep()
 
         val data = Data.Builder()
             .putLong(KEY_RULE_ID, rule.id)
@@ -408,6 +581,7 @@ class ExecuteAutomations @Inject constructor(
             .putString(KEY_REPLY_TEMPLATE, firstStep.replyTemplate)
             .putString(KEY_SENDER_ADDRESS, snap.address)
             .putInt(KEY_SUB_ID, snap.subId)
+            .putLong(KEY_FORWARD_RATE_LIMIT_MS, rule.forwardRateLimitMs)
             // WorkManager Data is limited to 10KB; cap the body to keep the
             // payload safely under the limit (handles long MMS bodies).
             .putString(KEY_MESSAGE_BODY, truncateUtf8(snap.body, MAX_DATA_BODY_BYTES))
@@ -417,22 +591,27 @@ class ExecuteAutomations @Inject constructor(
 
         val request = OneTimeWorkRequest.Builder(workerClass)
             .setInputData(data)
-            .apply { if (rule.delayMs > 0) setInitialDelay(rule.delayMs, TimeUnit.MILLISECONDS) }
+            .apply { if (delayMs > 0) setInitialDelay(delayMs, TimeUnit.MILLISECONDS) }
             .build()
 
+        val uniqueWorkName = "automation_msg_${snap.id}"
+
         return try {
+            val uniqueEnqueuer = uniqueWorkManagerEnqueuer
             val enqueuer = workManagerEnqueuer
             val appContext = try { context.applicationContext } catch (_: Throwable) { null }
-            if (enqueuer != null) {
+            if (uniqueEnqueuer != null) {
+                uniqueEnqueuer(uniqueWorkName, ExistingWorkPolicy.KEEP, request)
+            } else if (enqueuer != null) {
                 enqueuer(request)
             } else if (appContext == null) {
-                Timber.d("Simulated WorkManager enqueue for test environment")
+                Timber.d("Simulated WorkManager enqueue for test environment: $uniqueWorkName")
             } else {
-                WorkManager.getInstance(context).enqueue(request)
+                WorkManager.getInstance(context).enqueueUniqueWork(uniqueWorkName, ExistingWorkPolicy.KEEP, request)
             }
             true
         } catch (e: Throwable) {
-            Timber.w(e, "Unable to enqueue WorkManager request")
+            Timber.w(e, "Unable to enqueue WorkManager request for $uniqueWorkName")
             false
         }
     }
