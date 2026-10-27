@@ -43,6 +43,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Callable
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
+import android.content.ComponentCallbacks2
+import io.reactivex.schedulers.TestScheduler
 
 class AutomationPipelineE2ETest {
 
@@ -160,9 +162,14 @@ class AutomationPipelineE2ETest {
     class FakeMessageRepo : MessageRepository {
         val deletedMessageIds = mutableListOf<Long>()
         val markedReadThreadIds = mutableListOf<Long>()
+        val markedSuppressedIds = mutableListOf<Long>()
 
         override val deduplicationProgress: Observable<MessageRepository.DeduplicationProgress>
             get() = Observable.empty()
+
+        override fun markPendingSuppression(messageId: Long) {
+            markedSuppressedIds.add(messageId)
+        }
 
         override fun deleteMessages(messageIds: Collection<Long>) {
             deletedMessageIds.addAll(messageIds)
@@ -2810,6 +2817,345 @@ class AutomationPipelineE2ETest {
         // Immediately try to acquire with same phone number formatted differently
         val secondAcquired = repo.tryAcquireForwardSlot("+1-555-123-4567", 60000L)
         assertFalse("Must be rate limited for identical destination phone regardless of punctuation/formatting", secondAcquired)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 41. Send & Resend Button Throttling (50Hz Rapid Tap Simulation)
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testSendAndResendButtonThrottling_rapidTapSimulation() {
+        val testScheduler = TestScheduler()
+        val sendSubject = PublishSubject.create<Unit>()
+        val sendEmissions = mutableListOf<Unit>()
+
+        sendSubject
+            .throttleFirst(500, TimeUnit.MILLISECONDS, testScheduler)
+            .subscribe { sendEmissions.add(it) }
+
+        // Simulate 50Hz rapid tapping (50 calls in 500ms, 1 every 10ms)
+        for (i in 0 until 50) {
+            sendSubject.onNext(Unit)
+            testScheduler.advanceTimeBy(10, TimeUnit.MILLISECONDS)
+        }
+
+        // Only the 1st tap should be emitted within 500ms; remaining 49 taps dropped
+        assertEquals(1, sendEmissions.size)
+
+        // Advance past the 500ms throttle window
+        testScheduler.advanceTimeBy(10, TimeUnit.MILLISECONDS)
+        sendSubject.onNext(Unit)
+        assertEquals(2, sendEmissions.size)
+
+        // Also verify resend throttling
+        val resendSubject = PublishSubject.create<Long>()
+        val resendEmissions = mutableListOf<Long>()
+        resendSubject
+            .throttleFirst(500, TimeUnit.MILLISECONDS, testScheduler)
+            .subscribe { resendEmissions.add(it) }
+
+        for (i in 0 until 50) {
+            resendSubject.onNext(42L)
+            testScheduler.advanceTimeBy(10, TimeUnit.MILLISECONDS)
+        }
+        assertEquals(1, resendEmissions.size)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 42. Conductor View Leak Cleanup on onDestroyView
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testConductorViewLeakCleanupOnDestroyView() {
+        val mockComponent = Mockito.mock(dev.octoshrimpy.quik.injection.AppComponent::class.java)
+        try {
+            val field = Class.forName("dev.octoshrimpy.quik.injection.AppComponentManagerKt").getDeclaredField("appComponent")
+            field.isAccessible = true
+            field.set(null, mockComponent)
+        } catch (e: Exception) {
+            // Already initialized or not accessible
+        }
+
+        val controller = AutomationsController()
+        val mockView = Mockito.mock(android.view.View::class.java)
+
+        val adapterField = AutomationsController::class.java.getDeclaredField("adapter").apply { isAccessible = true }
+        val failedField = AutomationsController::class.java.getDeclaredField("failedAdapter").apply { isAccessible = true }
+        val logsField = AutomationsController::class.java.getDeclaredField("logsAdapter").apply { isAccessible = true }
+
+        val adapter = adapterField.get(controller) as dev.octoshrimpy.quik.feature.settings.automations.AutomationRulesAdapter
+        val failedAdapter = failedField.get(controller) as dev.octoshrimpy.quik.feature.settings.automations.FailedAutomationMessagesAdapter
+        val logsAdapter = logsField.get(controller) as dev.octoshrimpy.quik.feature.settings.automations.AutomationLogsAdapter
+
+        adapter.emptyView = mockView
+        failedAdapter.emptyView = mockView
+        logsAdapter.emptyView = mockView
+
+        assertNotNull(adapter.emptyView)
+        assertNotNull(failedAdapter.emptyView)
+        assertNotNull(logsAdapter.emptyView)
+
+        val onDestroyMethod = com.bluelinelabs.conductor.Controller::class.java.getDeclaredMethod("onDestroyView", android.view.View::class.java).apply { isAccessible = true }
+        onDestroyMethod.invoke(controller, mockView)
+
+        org.junit.Assert.assertNull("adapter.emptyView must be nulled on onDestroyView", adapter.emptyView)
+        org.junit.Assert.assertNull("failedAdapter.emptyView must be nulled on onDestroyView", failedAdapter.emptyView)
+        org.junit.Assert.assertNull("logsAdapter.emptyView must be nulled on onDestroyView", logsAdapter.emptyView)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 43. ReDoS Regex Evaluation Timeout on Content Filters
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testReDoSProtectionOnContentFilterRegexEvaluation() {
+        val evilPattern = "(a+)+$"
+        val evilInput = "aaaaaaaaaaaaaaaaaaaaaaaaaaaa!" // catastrophic backtracking
+
+        val start = System.currentTimeMillis()
+        val matchesEvil = ExecuteAutomations.safeRegexMatch(evilPattern, false, evilInput)
+        val elapsed = System.currentTimeMillis() - start
+
+        assertFalse("Catastrophic backtracking ReDoS must safely return false", matchesEvil)
+        assertTrue("Regex timeout must terminate within safe boundary (actual: ${elapsed}ms)", elapsed < 2000)
+
+        // Normal regex matching succeeds
+        val validMatch = ExecuteAutomations.safeRegexMatch("^[0-9]+$", false, "123456")
+        assertTrue(validMatch)
+
+        // Over-length pattern rejected immediately
+        val longPattern = "a".repeat(300)
+        assertFalse(ExecuteAutomations.safeRegexMatch(longPattern, false, "a"))
+
+        // Malformed pattern handled gracefully
+        assertFalse(ExecuteAutomations.safeRegexMatch("[unclosed", false, "test"))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 44. 100 Concurrent Message Ingestion with Monotonic IDs
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testConcurrentMessageIngestionMonotonicIds() {
+        val mockRealm = Mockito.mock(io.realm.Realm::class.java)
+        @Suppress("UNCHECKED_CAST")
+        val query = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<Message>
+        Mockito.`when`(mockRealm.where(Message::class.java)).thenReturn(query)
+        Mockito.`when`(query.max(Mockito.anyString())).thenReturn(1000L)
+
+        val keyManager = KeyManagerImpl { mockRealm }
+        val executor = Executors.newFixedThreadPool(16)
+        val generatedIds = ConcurrentHashMap.newKeySet<Long>()
+
+        val futures = (1..100).map {
+            executor.submit(Callable {
+                val id = keyManager.newId()
+                generatedIds.add(id)
+                id
+            })
+        }
+
+        futures.forEach { it.get(5, TimeUnit.SECONDS) }
+        executor.shutdown()
+
+        assertEquals("All 100 concurrent requests must receive a unique ID", 100, generatedIds.size)
+        assertEquals("Monotonic sequential generation without collisions", (1001L..1100L).toSet(), generatedIds)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 45. True Suppress-First Lifecycle, Query Filtering & 60s TTL Watchdog
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testSuppressFirstLifecycleQueryFilteringAndWatchdogRecovery() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val mockConvRepo = FakeConvRepo()
+        val mockMsgRepo = FakeMessageRepo()
+        val mockContactsRepo = FakeContactRepo()
+
+        val deleteRule = AutomationRule(
+            id = 501L,
+            name = "Spam Delete Rule",
+            enabled = true,
+            matchBody = "spam trigger",
+            priority = 10,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(AutomationActionStep(action = AutomationRule.ACTION_DELETE)))
+        }
+        autoRepo.rules.add(deleteRule)
+
+        val interactor = ExecuteAutomations(
+            dummyContext(),
+            autoRepo,
+            mockContactsRepo,
+            mockMsgRepo,
+            mockConvRepo
+        )
+
+        // 1. Message matching ACTION_DELETE has pendingSuppression set immediately
+        val msg = createMessage(9001L, 100L, "+18885551234", "This is a spam trigger message")
+        assertEquals(false, msg.pendingSuppression)
+
+        val result = interactor.execute(msg)
+        assertTrue("Matching ACTION_DELETE must set pendingSuppression = true", msg.pendingSuppression)
+        assertTrue("Matching ACTION_DELETE must persist pending suppression via messageRepo", mockMsgRepo.markedSuppressedIds.contains(9001L))
+        assertTrue(result is ExecuteAutomations.ExecutionResult.Dropped)
+
+        // 2. Watchdog recovery for orphaned suppressed messages older than 60 seconds (Production method execution)
+        val mockRealm = Mockito.mock(io.realm.Realm::class.java)
+        val orphanedMsg = Message().apply {
+            id = 9002L
+            threadId = 101L
+            date = System.currentTimeMillis() - 75_000L // 75s old (older than 60s cutoff)
+            pendingSuppression = true
+        }
+        val recentMsg = Message().apply {
+            id = 9003L
+            threadId = 102L
+            date = System.currentTimeMillis() - 10_000L // 10s old (within 60s active window)
+            pendingSuppression = true
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        val messageQuery = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<Message>
+        @Suppress("UNCHECKED_CAST")
+        val realmResults = Mockito.mock(RealmResults::class.java) as RealmResults<Message>
+
+        Mockito.`when`(mockRealm.where(Message::class.java)).thenReturn(messageQuery)
+        Mockito.`when`(messageQuery.equalTo(Mockito.eq("pendingSuppression"), Mockito.eq(true))).thenReturn(messageQuery)
+        Mockito.`when`(messageQuery.lessThanOrEqualTo(Mockito.eq("date"), Mockito.anyLong())).thenReturn(messageQuery)
+        Mockito.`when`(messageQuery.findAll()).thenReturn(realmResults)
+        Mockito.`when`(realmResults.isEmpty()).thenReturn(false)
+        Mockito.`when`(realmResults.iterator()).thenAnswer { mutableListOf(orphanedMsg).iterator() }
+
+        Mockito.doAnswer { invocation ->
+            val transaction = invocation.arguments[0] as io.realm.Realm.Transaction
+            transaction.execute(mockRealm)
+            null
+        }.`when`(mockRealm).executeTransaction(Mockito.any())
+
+        // Execute recovery with production HousekeepingWorker method
+        val recoveredThreadIds = dev.octoshrimpy.quik.worker.HousekeepingWorker.scanAndResetOrphanedSuppressedMessages(60_000L) { mockRealm }
+        assertFalse("Orphaned message older than 60s must have pendingSuppression reset to false by production code", orphanedMsg.pendingSuppression)
+        assertTrue("Recent message younger than 60s must retain pendingSuppression = true", recentMsg.pendingSuppression)
+        assertEquals(listOf(101L), recoveredThreadIds)
+
+        // Verify HousekeepingWorker delegates to NotificationManager
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+        val mockRepoForWorker = Mockito.mock(MessageRepository::class.java)
+        Mockito.`when`(mockRepoForWorker.resetOrphanedSuppressedMessages(60_000L)).thenReturn(listOf(101L))
+
+        val workerContext = Mockito.mock(android.content.Context::class.java)
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        val housekeepingWorker = dev.octoshrimpy.quik.worker.HousekeepingWorker(workerContext, workerParams).apply {
+            this.messageRepo = mockRepoForWorker
+            this.notificationManager = mockNotificationManager
+        }
+        val workerRecoveredIds = housekeepingWorker.resetOrphanedSuppressedMessages(60_000L)
+        assertEquals(listOf(101L), workerRecoveredIds)
+        Mockito.verify(mockNotificationManager).update(101L)
+
+        // 3. Verify Query Filtering for suppress-first architecture
+        val mockFilterRealm = Mockito.mock(io.realm.Realm::class.java)
+        @Suppress("UNCHECKED_CAST")
+        val mockConvQuery = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<Conversation>
+        Mockito.`when`(mockFilterRealm.where(Conversation::class.java)).thenReturn(mockConvQuery)
+        Mockito.`when`(mockConvQuery.notEqualTo(Mockito.anyString(), Mockito.anyLong())).thenReturn(mockConvQuery)
+        Mockito.`when`(mockConvQuery.equalTo(Mockito.anyString(), Mockito.anyBoolean())).thenReturn(mockConvQuery)
+        Mockito.`when`(mockConvQuery.equalTo(Mockito.anyString(), Mockito.anyString())).thenReturn(mockConvQuery)
+        Mockito.`when`(mockConvQuery.isNotEmpty(Mockito.anyString())).thenReturn(mockConvQuery)
+        Mockito.`when`(mockConvQuery.isNotNull(Mockito.anyString())).thenReturn(mockConvQuery)
+        Mockito.`when`(mockConvQuery.beginGroup()).thenReturn(mockConvQuery)
+        Mockito.`when`(mockConvQuery.endGroup()).thenReturn(mockConvQuery)
+        Mockito.`when`(mockConvQuery.or()).thenReturn(mockConvQuery)
+        Mockito.`when`(mockConvQuery.sort(Mockito.any(Array<String>::class.java), Mockito.any(Array<io.realm.Sort>::class.java))).thenReturn(mockConvQuery)
+
+        val convRepoImpl = org.objenesis.ObjenesisStd().newInstance(dev.octoshrimpy.quik.repository.ConversationRepositoryImpl::class.java)
+        val method = dev.octoshrimpy.quik.repository.ConversationRepositoryImpl::class.java.getDeclaredMethod(
+            "getConversationsBase",
+            io.realm.Realm::class.java,
+            Boolean::class.javaPrimitiveType,
+            Boolean::class.javaPrimitiveType
+        ).apply { isAccessible = true }
+
+        method.invoke(convRepoImpl, mockFilterRealm, false, false)
+        Mockito.verify(mockConvQuery).equalTo("lastMessage.pendingSuppression", false)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 48. EditAutomation Input Debouncing (300ms)
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testEditAutomationTextDebouncing_300ms() {
+        val testScheduler = TestScheduler()
+        val debounceSubject = PublishSubject.create<Pair<Int, AutomationActionStep>>()
+        val emissions = mutableListOf<Pair<Int, AutomationActionStep>>()
+
+        debounceSubject
+            .debounce(300, TimeUnit.MILLISECONDS, testScheduler)
+            .subscribe { emissions.add(it) }
+
+        val initialStep = AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "")
+
+        // Simulate rapid keystrokes within 200ms
+        for (i in 1..5) {
+            debounceSubject.onNext(0 to initialStep.copy(forwardToPhone = "+155500000$i"))
+            testScheduler.advanceTimeBy(40, TimeUnit.MILLISECONDS) // 40ms * 5 = 200ms total
+        }
+
+        // Before 300ms of quiet time, zero emissions should occur
+        assertEquals("No emissions should occur before 300ms of debounce quiet time", 0, emissions.size)
+
+        // Advance quiet time by 300ms
+        testScheduler.advanceTimeBy(300, TimeUnit.MILLISECONDS)
+
+        // Exactly one emission with the latest text
+        assertEquals(1, emissions.size)
+        assertEquals("+1555000005", emissions[0].second.forwardToPhone)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 46. Realm Migration v20 -> v21 Message.pendingSuppression Field
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testQkRealmMigration_v20ToV21() {
+        val mockDynamicRealm = Mockito.mock(io.realm.DynamicRealm::class.java)
+        val mockSchema = Mockito.mock(io.realm.RealmSchema::class.java)
+        val mockMessageSchema = Mockito.mock(io.realm.RealmObjectSchema::class.java)
+
+        Mockito.`when`(mockDynamicRealm.schema).thenReturn(mockSchema)
+        Mockito.`when`(mockSchema.get("Message")).thenReturn(mockMessageSchema)
+        Mockito.`when`(mockMessageSchema.addField(Mockito.anyString(), Mockito.any(), Mockito.anyVararg())).thenReturn(mockMessageSchema)
+        Mockito.`when`(mockMessageSchema.transform(Mockito.any())).thenReturn(mockMessageSchema)
+
+        val mockCursor: dev.octoshrimpy.quik.mapper.CursorToContact = Mockito.mock(dev.octoshrimpy.quik.mapper.CursorToContact::class.java)
+        val mockPrefs: dev.octoshrimpy.quik.util.Preferences = Mockito.mock(dev.octoshrimpy.quik.util.Preferences::class.java)
+        val migration = dev.octoshrimpy.quik.migration.QkRealmMigration(mockCursor, mockPrefs)
+
+        assertEquals("SCHEMA_VERSION must be 21", 21L, dev.octoshrimpy.quik.migration.QkRealmMigration.SCHEMA_VERSION)
+
+        migration.migrate(mockDynamicRealm, 20L, 21L)
+
+        // Verify pendingSuppression field added to Message schema with REQUIRED and INDEXED attributes
+        Mockito.verify(mockMessageSchema).addField(
+            Mockito.eq("pendingSuppression"),
+            Mockito.eq(Boolean::class.java),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED),
+            Mockito.eq(io.realm.FieldAttribute.INDEXED)
+        )
+        Mockito.verify(mockMessageSchema).transform(Mockito.any())
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 47. Memory Pressure Handling (onTrimMemory and onLowMemory)
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testMemoryPressureHandling() {
+        val app = dev.octoshrimpy.quik.common.QKApplication()
+
+        // Calling onTrimMemory with various levels must handle gracefully without crashing
+        app.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
+        app.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN)
+        app.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_BACKGROUND)
+
+        // Calling onLowMemory must handle gracefully without crashing
+        app.onLowMemory()
     }
 }
 

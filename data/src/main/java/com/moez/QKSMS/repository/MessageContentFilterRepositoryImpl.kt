@@ -18,6 +18,7 @@
  */
 package dev.octoshrimpy.quik.repository
 
+import dev.octoshrimpy.quik.interactor.ExecuteAutomations
 import dev.octoshrimpy.quik.model.MessageContentFilter
 import dev.octoshrimpy.quik.model.MessageContentFilterData
 import io.realm.Realm
@@ -60,7 +61,7 @@ class MessageContentFilterRepositoryImpl @Inject constructor() : MessageContentF
                     if (isContact && !filter.includeContacts) {
                         false
                     } else if (filter.isRegex) {
-                        Regex(filter.value).matches(messageBody)
+                        ExecuteAutomations.safeRegexMatch(filter.value, filter.caseSensitive, messageBody)
                     } else if (filter.caseSensitive) {
                         val regexp = "[\\s\\S]*\\b" + Regex.escape(filter.value) + "\\b[\\s\\S]*"
                         Regex(regexp).matches(messageBody)

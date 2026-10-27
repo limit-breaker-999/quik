@@ -204,7 +204,7 @@ abstract class QkThemedActivity : QkActivity() {
     protected open fun applySystemBarInsets() {
         val content = findViewById<View>(android.R.id.content) ?: return
         ViewCompat.setOnApplyWindowInsetsListener(content) { v, windowInsets ->
-            val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
             v.setPadding(insets.left, insets.top, insets.right, insets.bottom)
             windowInsets
         }

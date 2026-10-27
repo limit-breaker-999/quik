@@ -27,7 +27,12 @@ import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.moez.QKSMS.manager.MediaRecorderManager
 import dev.octoshrimpy.quik.repository.ScheduledMessageRepository
+import dev.octoshrimpy.quik.manager.NotificationManager
+import dev.octoshrimpy.quik.model.Message
+import dev.octoshrimpy.quik.repository.AutomationRuleRepository
+import dev.octoshrimpy.quik.repository.MessageRepository
 import dev.octoshrimpy.quik.util.Constants
+import io.realm.Realm
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -64,10 +69,55 @@ class HousekeepingWorker(appContext: Context, workerParams: WorkerParameters)
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORKER_TAG)
         }
+
+        fun scanAndResetOrphanedSuppressedMessages(
+            ttlMs: Long = 60_000L,
+            realmProvider: () -> Realm = { Realm.getDefaultInstance() }
+        ): List<Long> {
+            val cutoff = System.currentTimeMillis() - ttlMs
+            val threadIds = mutableSetOf<Long>()
+            try {
+                realmProvider().use { realm ->
+                    val orphaned = realm.where(Message::class.java)
+                        .equalTo("pendingSuppression", true)
+                        .lessThanOrEqualTo("date", cutoff)
+                        .findAll()
+
+                    if (orphaned.isNotEmpty()) {
+                        realm.executeTransaction {
+                            orphaned.forEach { msg ->
+                                msg.pendingSuppression = false
+                                threadIds.add(msg.threadId)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                timber.log.Timber.w(e, "Error scanning orphaned suppressed messages")
+            }
+            return threadIds.toList()
+        }
     }
 
     @Inject lateinit var scheduledMessageRepository: ScheduledMessageRepository
     @Inject lateinit var automationRepo: dev.octoshrimpy.quik.repository.AutomationRuleRepository
+    @Inject lateinit var messageRepo: MessageRepository
+    @Inject lateinit var notificationManager: NotificationManager
+
+    fun resetOrphanedSuppressedMessages(
+        ttlMs: Long = 60_000L,
+        realmProvider: () -> Realm = { Realm.getDefaultInstance() }
+    ): List<Long> {
+        val threadIds = if (::messageRepo.isInitialized) {
+            messageRepo.resetOrphanedSuppressedMessages(ttlMs)
+        } else {
+            scanAndResetOrphanedSuppressedMessages(ttlMs, realmProvider)
+        }
+        if (::notificationManager.isInitialized) {
+            threadIds.forEach { notificationManager.update(it) }
+        }
+        return threadIds
+    }
 
     override fun doWork(): Result {
         val twoHoursAgo = (System.currentTimeMillis() - (2 * 60 * 60 * 1000))
@@ -79,6 +129,8 @@ class HousekeepingWorker(appContext: Context, workerParams: WorkerParameters)
         removeSavedMessagesTexts(twoHoursAgo)
 
         removeOrphanedComposeDelayCancelledAttachments(twoHoursAgo)
+
+        resetOrphanedSuppressedMessages()
 
         if (::automationRepo.isInitialized) {
             try {

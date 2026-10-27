@@ -106,4 +106,8 @@ interface MessageRepository {
     fun deduplicateMessages(): Flowable<DeduplicationResult>
 
     fun markAsSendingNow(messageId: Long)
+
+    fun resetOrphanedSuppressedMessages(ttlMs: Long = 60_000L): List<Long> = emptyList()
+
+    fun markPendingSuppression(messageId: Long) = Unit
 }

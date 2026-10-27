@@ -24,8 +24,11 @@ import dev.octoshrimpy.quik.model.AutomationActionStep
 import dev.octoshrimpy.quik.model.AutomationRule
 import dev.octoshrimpy.quik.model.AutomationStepHelper
 import io.reactivex.Observable
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.disposables.Disposable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
+import java.util.concurrent.TimeUnit
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -55,6 +58,8 @@ class EditAutomationController(private val ruleId: Long = -1L)
     private val moveUpSubject: Subject<Int> = PublishSubject.create()
     private val moveDownSubject: Subject<Int> = PublishSubject.create()
     private val stepUpdatedSubject: Subject<Pair<Int, AutomationActionStep>> = PublishSubject.create()
+    private val stepDebounceSubject: Subject<Pair<Int, AutomationActionStep>> = PublishSubject.create()
+    private var stepDebounceDisposable: Disposable? = null
 
     init {
         appComponent.inject(this)
@@ -71,6 +76,12 @@ class EditAutomationController(private val ruleId: Long = -1L)
         presenter.bindIntents(this)
         setTitle(if (ruleId < 0) R.string.automation_edit_title_new else R.string.automation_edit_title_edit)
         showBackButton(true)
+
+        stepDebounceDisposable?.dispose()
+        stepDebounceDisposable = stepDebounceSubject
+            .debounce(300, TimeUnit.MILLISECONDS)
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe { pair -> stepUpdatedSubject.onNext(pair) }
     }
 
     override fun onViewCreated() {
@@ -248,7 +259,7 @@ class EditAutomationController(private val ruleId: Long = -1L)
                                     val cur = currentSteps[idx]
                                     val newText = s?.toString().orEmpty()
                                     if (cur.forwardToPhone != newText) {
-                                        stepUpdatedSubject.onNext(idx to cur.copy(forwardToPhone = newText))
+                                        stepDebounceSubject.onNext(idx to cur.copy(forwardToPhone = newText))
                                     }
                                 }
                             }
@@ -284,7 +295,7 @@ class EditAutomationController(private val ruleId: Long = -1L)
                                     val cur = currentSteps[idx]
                                     val newText = s?.toString().orEmpty()
                                     if (cur.forwardToUrl != newText) {
-                                        stepUpdatedSubject.onNext(idx to cur.copy(forwardToUrl = newText))
+                                        stepDebounceSubject.onNext(idx to cur.copy(forwardToUrl = newText))
                                     }
                                 }
                             }
@@ -444,6 +455,8 @@ class EditAutomationController(private val ruleId: Long = -1L)
     }
 
     override fun onDestroyView(view: View) {
+        stepDebounceDisposable?.dispose()
+        stepDebounceDisposable = null
         super.onDestroyView(view)
         lastRenderedSteps = null
     }
@@ -472,8 +485,33 @@ class EditAutomationController(private val ruleId: Long = -1L)
     override fun skipContactsToggle(): Observable<Boolean> =
         binding.skipContactsSwitch.checkedChanges().skipInitialValue().filter { !isRendering }
 
+    private fun flushStepDebounce() {
+        val container = binding.actionStepsContainer
+        for (i in 0 until container.childCount) {
+            val child = container.getChildAt(i)
+            val stepBinding = ItemAutomationActionStepBinding.bind(child)
+            if (i in currentSteps.indices) {
+                val cur = currentSteps[i]
+                when (cur.action) {
+                    AutomationRule.ACTION_FORWARD_SMS -> {
+                        val newPhone = stepBinding.forwardPhoneField.text?.toString().orEmpty()
+                        if (cur.forwardToPhone != newPhone) {
+                            stepUpdatedSubject.onNext(i to cur.copy(forwardToPhone = newPhone))
+                        }
+                    }
+                    AutomationRule.ACTION_FORWARD_HTTP -> {
+                        val newUrl = stepBinding.forwardUrlField.text?.toString().orEmpty()
+                        if (cur.forwardToUrl != newUrl) {
+                            stepUpdatedSubject.onNext(i to cur.copy(forwardToUrl = newUrl))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     override fun delaySelected(): Observable<Long> = delaySubject
-    override fun saveClicks(): Observable<*> = binding.saveButton.clicks()
+    override fun saveClicks(): Observable<*> = binding.saveButton.clicks().doOnNext { flushStepDebounce() }
     override fun presetClicks(): Observable<*> = binding.presetsButton.clicks()
 
     override fun presetSelected(): Observable<Pair<String, Boolean>> = presetSubject

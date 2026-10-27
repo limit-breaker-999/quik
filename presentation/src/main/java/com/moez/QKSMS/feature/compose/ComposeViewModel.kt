@@ -38,6 +38,7 @@ import com.moez.QKSMS.manager.MediaRecorderManager.AUDIO_FILE_PREFIX
 import com.moez.QKSMS.manager.MediaRecorderManager.AUDIO_FILE_SUFFIX
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
+import java.util.concurrent.TimeUnit
 import dev.octoshrimpy.quik.R
 import dev.octoshrimpy.quik.common.ExternalNavigator
 import dev.octoshrimpy.quik.common.Navigator
@@ -752,6 +753,7 @@ class ComposeViewModel @Inject constructor(
 
         // resend a failed message
         view.resendIntent
+            .throttleFirst(500, TimeUnit.MILLISECONDS)
             .mapNotNull(messageRepo::getMessage)
             .filter { message -> message.isFailedMessage() }
             .doOnNext { message -> sendExistingMessage.execute(message.id) }
@@ -1173,6 +1175,7 @@ class ComposeViewModel @Inject constructor(
 
         // Send a message when the send button is clicked, and disable editing mode if it's enabled
         view.sendIntent
+            .throttleFirst(500, TimeUnit.MILLISECONDS)
             .observeOn(Schedulers.io())
             .withLatestFrom(
                 view.textChangedIntent,
