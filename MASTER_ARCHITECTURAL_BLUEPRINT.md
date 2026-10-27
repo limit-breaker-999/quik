@@ -340,3 +340,41 @@ When a user requests messages 3 to 4 times within 15 minutes, forwards fail and 
 3. **Next Investigator / Coder Priority**:
    - Coding agents should immediately implement Realm migration schema bumps (`forwardRateLimitMs`, `pendingSuppression`, `QuarantinedMessage`, `AutomationStepLedger`), followed by the "Suppress-First" pipeline interceptor in `ExecuteAutomations` and `AutomationActionWorker`.
 
+
+---
+
+## Section 7: Multi-Rule Concurrency, Cascading Carrier Feedback Loops & Precedence Arbitration
+
+### 7.1 Multi-Rule Concurrency Analysis
+When a single incoming message matches multiple enabled rules (e.g. Rule 1: Forward + Delete, Rule 2: Archive or Auto-Reply):
+1. **Unordered Evaluation Defect**: `automationRepo.getEnabledRules()` returns rules in arbitrary B-tree storage order without explicit priority sorting.
+2. **Parallel WorkManager Contention**: Independent `OneTimeWorkRequest`s are scheduled concurrently for the same `messageId`. If Rule 1 deletes the message before Rule 2 runs, Rule 2 produces orphaned auto-replies or records false-positive failure entries in `FailedAutomationMessage`.
+3. **Ghost Notification Defect**: If any rule contains asynchronous actions, `isDropped` remains `false` in `ExecuteAutomations.kt`, causing `ReceiveSmsWorker` to fire a sound/heads-up notification that disappears abruptly when the message is deleted seconds later.
+
+### 7.2 Unified Action Plan Compiler
+To guarantee deterministic execution and eliminate race conditions:
+1. **Rule Prioritization (`priority: Int`)**: Rules are evaluated in descending priority order (`sort("priority", Sort.DESCENDING)`).
+2. **Exclusive Execution (`stopOnMatch: Boolean`)**: If a matching rule has `stopOnMatch = true`, evaluation halts immediately.
+3. **Canonical Action Plan Merging**: When multiple rules match without `stopOnMatch`, actions are compiled into a SINGLE atomic sequence:
+   $$\text{External Egress (HTTP, Forward SMS, Reply)} \longrightarrow \text{Thread Mutations (Read, Archive)} \longrightarrow \text{Terminal Action (Delete)}$$
+4. **Single Unique WorkRequest**: Schedule exactly one worker per message:
+   `WorkManager.enqueueUniqueWork("automation_msg_${snap.id}", ExistingWorkPolicy.KEEP, request)`
+5. **Immediate Notification Suppression ("Suppress-First")**: If the compiled plan contains `ACTION_DELETE`, set `isDropped = true` upfront in `ExecuteAutomations` so no system notification ever sounds or surfaces.
+
+### 7.3 Cascading Feedback SMS & Infinite Loop Protection
+When an outbound forward triggers an immediate inbound balance/delivery SMS from the carrier SIM (e.g. "Balance remaining: $14.50"), and that feedback SMS matches another forward rule:
+1. **Carrier Shortcode / Alphanumeric Filter**: Block automated `ACTION_FORWARD_SMS` if the sender is an alphanumeric shortcode (length $\le 6$ and non-E.164) or USSD gateway unless explicitly whitelisted.
+2. **Self-Forward / Loop Header Detection**: Abort automated forwarding if `message.body` contains `"From: <own_number>"` or the target forwarding destination.
+3. **Forward Rate Limiting (`forwardRateLimitMs`)**: Add per-destination forward debouncing (default 60s cooldown per destination).
+4. **Rolling Outbound Budget**: Cap automated SMS at 20 messages per 30 minutes in Realm (`OutboundSmsTracker`) to prevent triggering Android's 30-message `SmsUsageMonitor` background security dialog.
+5. **Serial Radio Pacing Queue**: Funnel outbound automated SMS through a 2,000ms inter-message pacing queue to eliminate baseband modem buffer collisions and carrier SMSC congestion (`SM_CAUSE_CONGESTION`).
+
+### 7.4 Thread-Safe Primary Key Generation (`KeyManagerImpl.kt`)
+- `KeyManager.newId()` is invoked concurrently by inbound SMS (`insertReceivedSms`) and outbound forward synchronization (`syncProviderMessage`).
+- Protect `newId()` with `synchronized(lock)` to prevent identical primary key collisions that destroy messages in Realm.
+- Fix `reset()` to re-query the database maximum rather than resetting `maxValue = 0L`, preventing historical message overwrites during background sync.
+
+### 7.5 Version Bump Specification
+- Update `presentation/build.gradle` to `versionCode 2250`, `versionName '4.5.0'`.
+- Update `changelog.json` with release notes for `4.5.0`.
+- Bump Realm schema version to `20L` in `QkRealmMigration.kt` to support `priority`, `stopOnMatch`, `forwardRateLimitMs`, and `OutboundSmsTracker`.
