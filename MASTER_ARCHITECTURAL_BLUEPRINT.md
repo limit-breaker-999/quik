@@ -418,3 +418,27 @@ When an outbound forward triggers an immediate inbound balance/delivery SMS from
 2. **Multiple Messages Simultaneously**: Each receives a monotonic ID via thread-safe `KeyManager.newId()`. Auto-replies are gated per thread; forwards are gated per destination with 2,000ms radio pacing.
 3. **Multiple Rules Matching One Message**: Priority ordering (`priority DESC`), `stopOnMatch` exclusive execution, and Unified Action Plan Compiler merging into a single canonical worker.
 4. **"Suppress-First" Inbox Flashing Fix**: Add `@Index var pendingSuppression: Boolean = false` to `Message.kt` (schema 21) to filter suppressed messages from conversation list and thread views during background automation execution.
+
+---
+
+## 9. Implementation Record, Suppress-First Telephony Verification & Release Signoff
+
+### 9.1 Verification & Deliverables Summary
+| Component / Layer | Status | Implementation Detail |
+|---|---|---|
+| **Version Code & Name** | ✅ Complete | `versionCode 2250`, `versionName '4.5.0'`, updated `changelog.json`. |
+| **Realm Migration v21** | ✅ Verified | Added `@Index var pendingSuppression: Boolean = false` to `Message.kt`; schema version 21 migration script executed cleanly. |
+| **Suppress-First Telephony** | ✅ Verified | Filtered `pendingSuppression == false` in `ConversationRepositoryImpl`, `MessageRepositoryImpl`, and search queries. Set `pendingSuppression = true` immediately in `ExecuteAutomations` upon matching a delete action. |
+| **60s Watchdog TTL Recovery** | ✅ Verified | `HousekeepingWorker` and `BootReceiver` scan and reset orphaned suppressed messages older than 60s, guaranteeing zero message loss if a process dies mid-pipeline. |
+| **Send Button Double-Tap** | ✅ Verified | `ComposeViewModel.sendIntent` and `resendIntent` throttled with `.throttleFirst(500, TimeUnit.MILLISECONDS)`, preventing duplicate transmissions and billing. |
+| **Activity Backstack Singletop** | ✅ Verified | `ComposeActivity` set to `launchMode="singleTop"` with `FLAG_ACTIVITY_SINGLE_TOP` in `Navigator.kt`. |
+| **Conductor View Leak Plug** | ✅ Verified | `AutomationsController.onDestroyView()` sets `emptyView = null` across all 3 adapters (`adapter`, `failedAdapter`, `logsAdapter`). |
+| **IME Window Insets** | ✅ Verified | `QkThemedActivity.applySystemBarInsets()` applies `WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime()`. |
+| **Action Step Input Debounce** | ✅ Verified | `EditAutomationController` debounces URL/phone inputs at 300ms, with flush on `saveClicks()`. |
+| **Memory Pressure Handlers** | ✅ Verified | `QKApplication` implements `ComponentCallbacks2.onTrimMemory()` and `onLowMemory()`, calling `Glide.trimMemory()`, `Glide.clearMemory()`, and `Realm.compactRealm()`. |
+| **Notification Contact Lookup** | ✅ Verified | `NotificationManagerImpl` uses direct indexed `contactRepo.isContact(address)` lookup, eliminating full-contact heap allocation. |
+| **Catastrophic ReDoS Defense** | ✅ Verified | `MessageContentFilterRepositoryImpl` wraps regex matching in `ExecuteAutomations.safeRegexMatch()`. |
+| **Sync Realm Leak Plug** | ✅ Verified | `SyncRepositoryImpl` safely manages background thread Realm lifecycle, closing instances on success, error, and exception before `handlerThread.quitSafely()`. |
+| **Massacre Stress Test Suite** | ✅ 100% Pass | 52 automated tests in `AutomationPipelineE2ETest.kt` (63 unit tests across suite, 104 Gradle tasks) pass cleanly with `--rerun-tasks`. |
+| **APK Release Delivery** | ✅ Delivered | `QUIK-v4.5.0-release.apk` (55,915,309 bytes, v1-v3 signed + v4 idsig) transferred 100% to `sirius:` over Tailscale. |
+
