@@ -378,3 +378,43 @@ When an outbound forward triggers an immediate inbound balance/delivery SMS from
 - Update `presentation/build.gradle` to `versionCode 2250`, `versionName '4.5.0'`.
 - Update `changelog.json` with release notes for `4.5.0`.
 - Bump Realm schema version to `20L` in `QkRealmMigration.kt` to support `priority`, `stopOnMatch`, `forwardRateLimitMs`, and `OutboundSmsTracker`.
+
+---
+
+## Section 8: UI/UX Rendering, Memory Profiling & Real-World "Massacre" Audit
+
+### 8.1 UI/UX Rendering & Interaction Glitches
+1. **Send & Resend Button Unthrottled Double-Tap Hazard**:
+   - In `ComposeViewModel.kt`, `view.sendIntent` and `view.resendIntent` lacked click throttling. Rapid double-tapping dispatches duplicate SMS messages and bills the user twice.
+   - **Remediation**: Add `.throttleFirst(500, TimeUnit.MILLISECONDS)` on all send and resend click streams.
+2. **`ComposeActivity` Activity Stack Duplication**:
+   - Neither manifest nor `Navigator.kt` specifies `singleTop` for `ComposeActivity`.
+   - **Remediation**: Add `android:launchMode="singleTop"` in `AndroidManifest.xml` and `Intent.FLAG_ACTIVITY_SINGLE_TOP` in `Navigator.kt`.
+3. **Conductor Controller View Leak**:
+   - `adapter.emptyView` in `AutomationsController.kt` retains strong references to detached views when pushing child controllers under `RETAIN_DETACH`.
+   - **Remediation**: Override `onDestroyView()` in `AutomationsController` and null out adapter `emptyView` references.
+4. **IME Keyboard Occlusion on Android 11+**:
+   - `applySystemBarInsets()` in `QkThemedActivity.kt` queries `systemBars()` but ignores `WindowInsetsCompat.Type.ime()`.
+   - **Remediation**: Update insets listener to combine `systemBars()` and `ime()` insets, applying padding to view containers instead of `android.R.id.content`.
+
+### 8.2 RAM Management & Swiped-from-Recents Lifecycle
+1. **Swiped-from-Recents Behavior**:
+   - Swiping the app from the recent apps drawer kills the UI process (`SIGKILL`).
+   - When an incoming SMS arrives, Android spawns a background process for `SmsReceivedReceiver` with `goAsync()` (extending wake lock up to 30s), saves to provider + Realm, enqueues `ReceiveSmsWorker` (expedited WorkManager), and transfers execution to `JobScheduler`.
+   - Mid-flight worker interruption: WorkManager detects `isStopped` and retries. The persistent step ledger in `SharedPreferences` skips already completed steps.
+2. **Estimated RAM Footprint**:
+   - **Idle Background**: ~30 MB – 42 MB (16–22 MB JVM heap + 14–20 MB native RSS/Realm).
+   - **Active Conversation List**: ~52 MB – 75 MB.
+   - **Active Composing**: ~68 MB – 115 MB.
+   - **Background Worker Execution**: ~38 MB – 60 MB.
+   - **Full Telephony Sync**: ~160 MB – 290 MB.
+3. **Memory Pressure (`onTrimMemory`)**:
+   - Implement `ComponentCallbacks2.onTrimMemory()` in `QKApplication.kt` to flush Glide bitmap caches and Realm instance caches under OS memory pressure (`TRIM_MEMORY_RUNNING_CRITICAL`).
+4. **Native Realm Leak Plugs**:
+   - Plug unclosed Realm instances in `SyncRepositoryImpl.kt` (`handlerThread.quitSafely()`), `ConversationRepositoryImpl.kt`, and `MessageContentFilterRepositoryImpl.kt`.
+
+### 8.3 Multi-Rule & Multi-Regex Semantics
+1. **Single Rule with Compound Regex**: Evaluated once per message; does NOT execute multiple times for multiple regex matches within the same rule.
+2. **Multiple Messages Simultaneously**: Each receives a monotonic ID via thread-safe `KeyManager.newId()`. Auto-replies are gated per thread; forwards are gated per destination with 2,000ms radio pacing.
+3. **Multiple Rules Matching One Message**: Priority ordering (`priority DESC`), `stopOnMatch` exclusive execution, and Unified Action Plan Compiler merging into a single canonical worker.
+4. **"Suppress-First" Inbox Flashing Fix**: Add `@Index var pendingSuppression: Boolean = false` to `Message.kt` (schema 21) to filter suppressed messages from conversation list and thread views during background automation execution.
