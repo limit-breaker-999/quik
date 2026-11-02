@@ -1,26 +1,17 @@
 # PROGRESS — Forward-Reliability + Deep Automation Diagnostics
 
-Branch: `feature/material3-redesign-v2`. Plan: `local://quik-forward-reliability-plan.md` (approved).
+Branch: `feature/material3-redesign-v2`. Commit `110284e8` — all 5 plan phases complete.
 
-## Done
-- Phase 1 (egress gating rework):
-  - `AutomationRuleRepository`: `tryAcquireForwardSlot(dest, contentKey, rateLimitMs)` content-keyed (`forward:<dest>:<sha256-16>`); `releaseForwardSlot`/`releaseReplySlot`/`getRulesList` defaults; `log(..., payloadJson="{}")`.
-  - `AutomationActionWorker` FORWARD_SMS: declines (cooldown/self-loop/carrier-shortcode) → INFO skip (chain continues, DELETE still wipes); budget-exceeded → skip + retryable FailedAutomationMessage; send failure → slot refund + `Result.retry()` (max 3 attempts via runAttemptCount) then terminal failure. AUTO_REPLY: same refund+retry.
-  - `ExecuteAutomations`: reply gate strips only AUTO_REPLY steps (rule's forwards still run), logs INFO "Auto-reply suppressed"; `scheduleAction` sets exponential backoff (10s).
-  - AutomationsPresenter retry: passes `KEY_FORWARD_RATE_LIMIT_MS` + backoff.
-  - Editor: `EditAutomationState.forwardRateLimitMin/replyRateLimitMin`, view intents, controller render/debounce, presenter load/save (min↔ms via 60_000), layout fields, strings.
-  - `AutomationDiag` helper created (domain/model/AutomationDiag.kt); `AutomationLog.jsonPayload` added.
-  - Test fakes updated (fake repo log/slot signatures; test 40 now content-keyed + distinct-content-passes assertion).
+## Done (committed)
+- **Phase 1 Egress gating**: content-keyed forward slot (`forward:<dest>:<sha256-16>`), `releaseForwardSlot`/`releaseReplySlot` refund, `Result.retry()` + EXPONENTIAL 10s backoff (3 attempts), decline-skip semantics (budget → retryable FailedAutomationMessage), reply gate strips AUTO_REPLY steps only, editor cooldown fields restored (minutes, 0=off), retry passes `KEY_FORWARD_RATE_LIMIT_MS`, real exception messages preserved.
+- **Phase 2 Deep logging**: schema v22 (`Message.suppressionExpiresAt`, `AutomationLog.jsonPayload`), `AutomationDiag` helper, INGEST/BLOCK_CHECK/FILTER_CHECK/AUTOMATION/MATCH/PLAN/DISPATCH/forward_guard/forward_send/reply_send/RADIO_ACK events; failures carry error+sender+body+actionsJson.
+- **Phase 3 Export UI**: Logs tab "Export JSON" bar → Copy (500k cap) / Save-as-file (`ACTION_CREATE_DOCUMENT` via `startActivityForResult`, REQUEST_SAVE_EXPORT=2002); per-row drill-down dialog with pretty payload + copy; presenter `buildDiagnosticsJson()` envelope.
+- **Phase 4 Suppression expiry**: `markPendingSuppression(id, expiresAt)` / `resetOrphanedSuppressedMessages()`; expiry = now + delayMs + 10min (60s immediate); QKApplication/BootReceiver/HousekeepingWorker call sites updated.
+- **Phase 5 subId**: `SmsReceivedReceiver` reads `"android.telephony.extra.SUBSCRIPTION_ID"` with `"subscription"` fallback.
+- Tests: 65/65 pass (`:presentation:testDebugUnitTest`), incl. new v21→v22 migration test, export-shape test, reworked skip-semantics/expiry tests; `org.json:json` test dep added.
 
-## In progress
-- Phase 1 compile verification (gradle job running).
+## Verification limits
+- No emulator on host: on-device scenarios (2 SMS <60s apart, airplane-mode retry, export copy/save on Samsung/Realme Android 16) not exercised — delegate to user via `adb logcat -s AutomationActionWorker:* MessageSentReceiver:*`.
 
 ## Next
-- Phase 2: migration v22 (`Message.suppressionExpiresAt`, done jsonPayload already), instrument ReceiveSmsWorker/ExecuteAutomations/MessageSentReceiver, failure payloads.
-- Phase 3: export builder in AutomationsPresenter, Logs tab export button + copy/save dialog, per-entry drill-down, strings, TestAutomationsView.
-- Phase 4: `markPendingSuppression(messageId, expiresAt)` / `resetOrphanedSuppressedMessages()` rework; expiry = now + delay + 10min buffer (60s if no delay); call sites QKApplication/BootReceiver/HousekeepingWorker; test updates (FakeMessageRepo:170 pins old signature).
-- Phase 5: SmsReceivedReceiver subId via `"android.telephony.extra.SUBSCRIPTION_ID"`.
-- Cleanup: full unit suite, MASTER_ARCHITECTURAL_BLUEPRINT.md §4.2/§7.3/§10, PROGRESS.md, commit per phase.
-
-## Open decisions
-- None — plan approved as-is. Manual device verification delegated to user (no emulator on host).
+- None in scope. Optional: user-driven device verification; `/opsx-archive`.
