@@ -18,6 +18,8 @@ interface EditAutomationView : QkViewContract<EditAutomationState> {
     fun presetSelected(): Observable<Pair<String, Boolean>>
 
     fun delaySelected(): Observable<Long>
+    fun forwardRateLimitChanges(): Observable<Int>
+    fun replyRateLimitChanges(): Observable<Int>
 
     fun addStepClicks(): Observable<*>
     fun removeStepClicks(): Observable<Int>

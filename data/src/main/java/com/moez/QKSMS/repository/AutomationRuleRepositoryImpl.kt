@@ -87,10 +87,10 @@ class AutomationRuleRepositoryImpl(
         }
     }
 
-    override fun tryAcquireForwardSlot(destination: String, rateLimitMs: Long): Boolean {
+    override fun tryAcquireForwardSlot(destination: String, contentKey: String, rateLimitMs: Long): Boolean {
         val now = System.currentTimeMillis()
         val normalizedDest = destination.filter { it.isDigit() || it == '+' }
-        val key = "forward:${if (normalizedDest.isNotEmpty()) normalizedDest else destination.trim()}"
+        val key = "forward:${if (normalizedDest.isNotEmpty()) normalizedDest else destination.trim()}:$contentKey"
         return realmProvider().use { realm ->
             var acquired = false
             realm.executeTransaction { r ->
@@ -107,6 +107,39 @@ class AutomationRuleRepositoryImpl(
                 }
             }
             acquired
+        }
+    }
+
+    override fun releaseForwardSlot(destination: String, contentKey: String) {
+        val normalizedDest = destination.filter { it.isDigit() || it == '+' }
+        val key = "forward:${if (normalizedDest.isNotEmpty()) normalizedDest else destination.trim()}:$contentKey"
+        try {
+            realmProvider().use { realm ->
+                realm.executeTransaction { r ->
+                    r.where(AutomationReplyState::class.java)
+                        .equalTo("id", key)
+                        .findAll()
+                        .deleteAllFromRealm()
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to release forward slot")
+        }
+    }
+
+    override fun releaseReplySlot(ruleId: Long, threadId: Long) {
+        val key = "$ruleId:$threadId"
+        try {
+            realmProvider().use { realm ->
+                realm.executeTransaction { r ->
+                    r.where(AutomationReplyState::class.java)
+                        .equalTo("id", key)
+                        .findAll()
+                        .deleteAllFromRealm()
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to release reply slot")
         }
     }
 
@@ -241,6 +274,16 @@ class AutomationRuleRepositoryImpl(
         }
     }
 
+    override fun getRulesList(): List<AutomationRule> {
+        return realmProvider().use { realm ->
+            realm.where(AutomationRule::class.java)
+                .sort("priority", Sort.DESCENDING)
+                .findAll()
+                .map { realm.copyFromRealm(it) }
+        }
+    }
+
+
     override fun incrementHitCount(id: Long) {
         realmProvider().use { realm ->
             realm.executeTransaction {
@@ -351,7 +394,8 @@ class AutomationRuleRepositoryImpl(
         messageId: Long,
         type: String,
         actionType: String,
-        details: String
+        details: String,
+        payloadJson: String
     ) {
         try {
             realmProvider().use { realm ->
@@ -366,6 +410,7 @@ class AutomationRuleRepositoryImpl(
                         type = type,
                         actionType = actionType,
                         details = details,
+                        jsonPayload = payloadJson.ifBlank { "{}" },
                         timestamp = System.currentTimeMillis()
                     )
                     r.copyToRealmOrUpdate(logEntry)

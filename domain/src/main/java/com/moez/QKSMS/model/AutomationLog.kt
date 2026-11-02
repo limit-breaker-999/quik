@@ -11,6 +11,7 @@ open class AutomationLog(
     var type: String = TYPE_INFO,
     var actionType: String = "",
     var details: String = "",
+    var jsonPayload: String = "{}",
     var timestamp: Long = 0L
 ) : RealmObject() {
     companion object {

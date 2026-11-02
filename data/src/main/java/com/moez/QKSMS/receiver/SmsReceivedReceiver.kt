@@ -52,7 +52,9 @@ class SmsReceivedReceiver : BroadcastReceiver() {
                 Timber.v("onReceive() new sms")  // here so runs on io thread
 
                 messageRepo.insertReceivedSms(
-                    intent.extras?.getInt("subscription", -1) ?: -1,
+                    intent.getIntExtra("android.telephony.extra.SUBSCRIPTION_ID", -1)
+                        .takeIf { it > 0 }
+                        ?: intent.extras?.getInt("subscription", -1) ?: -1,
                     messages.firstOrNull()?.displayOriginatingAddress.orEmpty(),
                     messages.mapNotNull { it.displayMessageBody }.joinToString(""),
                     messages.firstOrNull()?.timestampMillis ?: System.currentTimeMillis()

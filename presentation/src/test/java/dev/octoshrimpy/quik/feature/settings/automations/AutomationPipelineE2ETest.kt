@@ -76,11 +76,12 @@ class AutomationPipelineE2ETest {
             rules.removeAll { it.id == id }
         }
         override fun getEnabledRules(): List<AutomationRule> = rules.filter { it.enabled }.sortedByDescending { it.priority }
+        override fun getRulesList(): List<AutomationRule> = rules.sortedByDescending { it.priority }
         override fun tryAcquireReplySlot(ruleId: Long, threadId: Long, rateLimitMs: Long): Boolean = true
         var forwardSlotAcquired: Boolean = true
         var budgetAvailable: Boolean = true
         val outboundSms = mutableListOf<String>()
-        override fun tryAcquireForwardSlot(destination: String, rateLimitMs: Long): Boolean = forwardSlotAcquired
+        override fun tryAcquireForwardSlot(destination: String, contentKey: String, rateLimitMs: Long): Boolean = forwardSlotAcquired
         override fun checkOutboundBudget(maxMessages: Int, windowMs: Long): Boolean = budgetAvailable
         override fun recordOutboundSms(destination: String) {
             outboundSms.add(destination)
@@ -120,7 +121,7 @@ class AutomationPipelineE2ETest {
             }
         }
 
-        override fun log(ruleId: Long, ruleName: String, messageId: Long, type: String, actionType: String, details: String) {
+        override fun log(ruleId: Long, ruleName: String, messageId: Long, type: String, actionType: String, details: String, payloadJson: String) {
             logs.add(
                 AutomationLog(
                     id = nextLogId++,
@@ -130,6 +131,7 @@ class AutomationPipelineE2ETest {
                     type = type,
                     actionType = actionType,
                     details = details,
+                    jsonPayload = payloadJson,
                     timestamp = System.currentTimeMillis()
                 )
             )
@@ -167,7 +169,7 @@ class AutomationPipelineE2ETest {
         override val deduplicationProgress: Observable<MessageRepository.DeduplicationProgress>
             get() = Observable.empty()
 
-        override fun markPendingSuppression(messageId: Long) {
+        override fun markPendingSuppression(messageId: Long, expiresAt: Long) {
             markedSuppressedIds.add(messageId)
         }
 
@@ -282,6 +284,8 @@ class AutomationPipelineE2ETest {
         val presetClicksSubject = PublishSubject.create<Unit>()
         val presetSelectedSubject = PublishSubject.create<Pair<String, Boolean>>()
         val delaySubject = PublishSubject.create<Long>()
+        val forwardRateLimitSubject = PublishSubject.create<Int>()
+        val replyRateLimitSubject = PublishSubject.create<Int>()
         val addStepSubject = PublishSubject.create<Unit>()
         val removeStepSubject = PublishSubject.create<Int>()
         val moveUpSubject = PublishSubject.create<Int>()
@@ -303,6 +307,8 @@ class AutomationPipelineE2ETest {
         override fun presetClicks(): Observable<*> = presetClicksSubject
         override fun presetSelected(): Observable<Pair<String, Boolean>> = presetSelectedSubject
         override fun delaySelected(): Observable<Long> = delaySubject
+        override fun forwardRateLimitChanges(): Observable<Int> = forwardRateLimitSubject
+        override fun replyRateLimitChanges(): Observable<Int> = replyRateLimitSubject
         override fun addStepClicks(): Observable<*> = addStepSubject
         override fun removeStepClicks(): Observable<Int> = removeStepSubject
         override fun moveStepUpClicks(): Observable<Int> = moveUpSubject
@@ -1689,7 +1695,7 @@ class AutomationPipelineE2ETest {
         }
         androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
             isAccessible = true
-            set(workerParams, 0)
+            set(workerParams, 3) // final attempt: retry budget exhausted, failure is terminal
         }
 
         AutomationActionWorker.clearLedger()
@@ -1785,7 +1791,7 @@ class AutomationPipelineE2ETest {
         }
         androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
             isAccessible = true
-            set(workerParams, 0)
+            set(workerParams, 3) // final attempt: retry budget exhausted, failure is terminal
         }
 
         AutomationActionWorker.clearLedger()
@@ -2192,7 +2198,7 @@ class AutomationPipelineE2ETest {
         }
         androidx.work.WorkerParameters::class.java.getDeclaredField("mRunAttemptCount").apply {
             isAccessible = true
-            set(workerParams, 0)
+            set(workerParams, 3) // final attempt: retry budget exhausted, failure is terminal
         }
 
         AutomationActionWorker.clearLedger()
@@ -2516,20 +2522,26 @@ class AutomationPipelineE2ETest {
         worker.automationRepo = autoRepo
         worker.notificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
 
-        // 1. Rate limit cooldown rejects forward
+        // 1. Rate limit cooldown skips the forward step (duplicate content):
+        //    chain completes, INFO logged, no FailedAutomationMessage
         autoRepo.forwardSlotAcquired = false
         val rateLimitResult = worker.doWork()
-        assertEquals(androidx.work.ListenableWorker.Result.failure(), rateLimitResult)
-        val failedAfterCooldown = autoRepo.getFailedMessagesList().last()
-        assertTrue(failedAfterCooldown.errorMessage.contains("Forward rate limit exceeded"))
+        assertEquals(androidx.work.ListenableWorker.Result.success(), rateLimitResult)
+        val failedCountAfterCooldown = autoRepo.getFailedMessagesList().size
+        assertTrue(autoRepo.getLogsList().any {
+            it.type == AutomationLog.TYPE_INFO && it.details.contains("Duplicate forward")
+        })
 
-        // 2. Outbound budget manager rejects forward
+        // 2. Outbound budget manager skips the forward step but records a
+        //    retryable failed message (budget recovers within 30 minutes)
         autoRepo.forwardSlotAcquired = true
         autoRepo.budgetAvailable = false
         val budgetResult = worker.doWork()
-        assertEquals(androidx.work.ListenableWorker.Result.failure(), budgetResult)
+        assertEquals(androidx.work.ListenableWorker.Result.success(), budgetResult)
         val failedAfterBudget = autoRepo.getFailedMessagesList().last()
         assertTrue(failedAfterBudget.errorMessage.contains("Outbound SMS budget exceeded"))
+        assertTrue(failedAfterBudget.canRetry)
+        assertTrue(autoRepo.getFailedMessagesList().size == failedCountAfterCooldown + 1)
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -2644,6 +2656,86 @@ class AutomationPipelineE2ETest {
             Mockito.eq(String::class.java),
             Mockito.eq(io.realm.FieldAttribute.REQUIRED)
         )
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 36b. Migration v21 → v22 adds suppressionExpiresAt + jsonPayload
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testQkRealmMigration_v21ToV22() {
+        val mockDynamicRealm = Mockito.mock(io.realm.DynamicRealm::class.java)
+        val mockSchema = Mockito.mock(io.realm.RealmSchema::class.java)
+        val mockMessageSchema = Mockito.mock(io.realm.RealmObjectSchema::class.java)
+        val mockLogSchema = Mockito.mock(io.realm.RealmObjectSchema::class.java)
+
+        Mockito.`when`(mockDynamicRealm.schema).thenReturn(mockSchema)
+        Mockito.`when`(mockSchema.get("Message")).thenReturn(mockMessageSchema)
+        Mockito.`when`(mockSchema.get("AutomationLog")).thenReturn(mockLogSchema)
+        Mockito.`when`(mockMessageSchema.addField(Mockito.anyString(), Mockito.any(), Mockito.anyVararg())).thenReturn(mockMessageSchema)
+        Mockito.`when`(mockMessageSchema.transform(Mockito.any())).thenReturn(mockMessageSchema)
+        Mockito.`when`(mockLogSchema.addField(Mockito.anyString(), Mockito.any(), Mockito.anyVararg())).thenReturn(mockLogSchema)
+        Mockito.`when`(mockLogSchema.transform(Mockito.any())).thenReturn(mockLogSchema)
+
+        val mockCursor: dev.octoshrimpy.quik.mapper.CursorToContact = Mockito.mock(dev.octoshrimpy.quik.mapper.CursorToContact::class.java)
+        val mockPrefs: dev.octoshrimpy.quik.util.Preferences = Mockito.mock(dev.octoshrimpy.quik.util.Preferences::class.java)
+        val migration = dev.octoshrimpy.quik.migration.QkRealmMigration(mockCursor, mockPrefs)
+
+        migration.migrate(mockDynamicRealm, 21L, 22L)
+
+        Mockito.verify(mockMessageSchema).addField(
+            Mockito.eq("suppressionExpiresAt"),
+            Mockito.eq(Long::class.java),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED)
+        )
+        Mockito.verify(mockLogSchema).addField(
+            Mockito.eq("jsonPayload"),
+            Mockito.eq(String::class.java),
+            Mockito.eq(io.realm.FieldAttribute.REQUIRED)
+        )
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 36c. Diagnostics Export Shape: rules + failedMessages + events (ascending)
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testDiagnosticsExportShape_containsRulesFailedMessagesAndAscendingEvents() {
+        val repo = FakeAutomationRuleRepo()
+        repo.rules.add(
+            AutomationRule(id = 7L, name = "Fwd", enabled = true, forwardRateLimitMs = 120000L, replyRateLimitMs = 86400000L)
+        )
+        repo.saveFailedMessage(
+            FailedAutomationMessage(messageId = 42L, ruleId = 7L, ruleName = "Fwd", errorMessage = "boom", canRetry = true)
+        )
+        repo.log(7L, "Fwd", 42L, dev.octoshrimpy.quik.model.AutomationLog.TYPE_INFO, "MATCH", "Matched incoming message")
+        Thread.sleep(2)
+        repo.log(7L, "Fwd", 42L, dev.octoshrimpy.quik.model.AutomationLog.TYPE_SUCCESS, "FORWARD_SMS", "Forwarded SMS to +1555",
+            dev.octoshrimpy.quik.model.AutomationDiag.json("stage" to "forward_send", "outcome" to "ok", "destination" to "+1555"))
+
+        val presenter = AutomationsPresenter(repo)
+        val json = presenter.buildDiagnosticsJson()
+
+        val root = org.json.JSONObject(json)
+        assertTrue(root.has("exportedAt"))
+        assertTrue(root.has("device"))
+        assertEquals(1, root.getInt("schema"))
+
+        val rules = root.getJSONArray("rules")
+        assertEquals(1, rules.length())
+        assertEquals(120000L, rules.getJSONObject(0).getLong("forwardRateLimitMs"))
+        assertEquals(86400000L, rules.getJSONObject(0).getLong("replyRateLimitMs"))
+
+        val failed = root.getJSONArray("failedMessages")
+        assertEquals(1, failed.length())
+        assertEquals("boom", failed.getJSONObject(0).getString("errorMessage"))
+
+        val events = root.getJSONArray("events")
+        assertEquals(2, events.length())
+        val ts0 = events.getJSONObject(0).getLong("ts")
+        val ts1 = events.getJSONObject(1).getLong("ts")
+        assertTrue("events must be ascending by timestamp", ts1 > ts0)
+        val data = events.getJSONObject(1).getJSONObject("data")
+        assertEquals("forward_send", data.getString("stage"))
+        assertEquals("+1555", data.getString("destination"))
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -2785,7 +2877,9 @@ class AutomationPipelineE2ETest {
     @Test
     fun testForwardSlotNormalizedPhoneNumberKeys() {
         val mockRealm = Mockito.mock(io.realm.Realm::class.java)
-        var storedState: dev.octoshrimpy.quik.model.AutomationReplyState? = null
+        // Key-aware in-memory slot store: (query-key -> last acquire time)
+        val slotStore = java.util.concurrent.ConcurrentHashMap<String, dev.octoshrimpy.quik.model.AutomationReplyState>()
+        var queriedKey = String()
 
         Mockito.doAnswer { invocation ->
             val transaction = invocation.arguments[0] as io.realm.Realm.Transaction
@@ -2796,27 +2890,34 @@ class AutomationPipelineE2ETest {
         @Suppress("UNCHECKED_CAST")
         val query = Mockito.mock(io.realm.RealmQuery::class.java) as io.realm.RealmQuery<dev.octoshrimpy.quik.model.AutomationReplyState>
         Mockito.`when`(mockRealm.where(dev.octoshrimpy.quik.model.AutomationReplyState::class.java)).thenReturn(query)
-        Mockito.`when`(query.equalTo(Mockito.eq("id"), Mockito.anyString())).thenReturn(query)
-        Mockito.`when`(query.findFirst()).thenAnswer { storedState }
+        Mockito.`when`(query.equalTo(Mockito.eq("id"), Mockito.anyString())).thenAnswer {
+            queriedKey = it.arguments[1] as String
+            query
+        }
+        Mockito.`when`(query.findFirst()).thenAnswer { slotStore[queriedKey] }
 
         Mockito.`when`(mockRealm.createObject(Mockito.eq(dev.octoshrimpy.quik.model.AutomationReplyState::class.java), Mockito.any())).thenAnswer {
             val key = it.arguments[1] as String
             val state = dev.octoshrimpy.quik.model.AutomationReplyState(id = key, lastReplyAt = System.currentTimeMillis())
-            storedState = state
+            slotStore[key] = state
             state
         }
 
         val repo = AutomationRuleRepositoryImpl { mockRealm }
 
         // Acquire with formatted phone number
-        val firstAcquired = repo.tryAcquireForwardSlot("+1 (555) 123-4567", 60000L)
+        val firstAcquired = repo.tryAcquireForwardSlot("+1 (555) 123-4567", "contentabc123", 60000L)
         assertTrue(firstAcquired)
-        assertNotNull(storedState)
-        assertEquals("forward:+15551234567", storedState!!.id)
+        assertNotNull(slotStore["forward:+15551234567:contentabc123"])
+        assertEquals("forward:+15551234567:contentabc123", slotStore["forward:+15551234567:contentabc123"]!!.id)
 
-        // Immediately try to acquire with same phone number formatted differently
-        val secondAcquired = repo.tryAcquireForwardSlot("+1-555-123-4567", 60000L)
-        assertFalse("Must be rate limited for identical destination phone regardless of punctuation/formatting", secondAcquired)
+        // Same destination formatted differently with identical content: still rate limited
+        val secondAcquired = repo.tryAcquireForwardSlot("+1-555-123-4567", "contentabc123", 60000L)
+        assertFalse("Must be rate limited for identical content+destination regardless of punctuation/formatting", secondAcquired)
+
+        // Same destination but different content: must pass (distinct messages are not duplicates)
+        val distinctAcquired = repo.tryAcquireForwardSlot("+1-555-123-4567", "different789", 60000L)
+        assertTrue("Distinct content to the same destination must not be rate limited", distinctAcquired)
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -2997,19 +3098,20 @@ class AutomationPipelineE2ETest {
         assertTrue("Matching ACTION_DELETE must persist pending suppression via messageRepo", mockMsgRepo.markedSuppressedIds.contains(9001L))
         assertTrue(result is ExecuteAutomations.ExecutionResult.Dropped)
 
-        // 2. Watchdog recovery for orphaned suppressed messages older than 60 seconds (Production method execution)
+        // 2. Watchdog recovery for expired suppressions (production method execution)
         val mockRealm = Mockito.mock(io.realm.Realm::class.java)
+        val now = System.currentTimeMillis()
         val orphanedMsg = Message().apply {
             id = 9002L
             threadId = 101L
-            date = System.currentTimeMillis() - 75_000L // 75s old (older than 60s cutoff)
             pendingSuppression = true
+            suppressionExpiresAt = now - 15_000L // expired 15s ago: chain abandoned, watchdog resets
         }
         val recentMsg = Message().apply {
             id = 9003L
             threadId = 102L
-            date = System.currentTimeMillis() - 10_000L // 10s old (within 60s active window)
             pendingSuppression = true
+            suppressionExpiresAt = now + 300_000L // 5min left: delayed chain pending, must stay suppressed
         }
 
         @Suppress("UNCHECKED_CAST")
@@ -3019,7 +3121,8 @@ class AutomationPipelineE2ETest {
 
         Mockito.`when`(mockRealm.where(Message::class.java)).thenReturn(messageQuery)
         Mockito.`when`(messageQuery.equalTo(Mockito.eq("pendingSuppression"), Mockito.eq(true))).thenReturn(messageQuery)
-        Mockito.`when`(messageQuery.lessThanOrEqualTo(Mockito.eq("date"), Mockito.anyLong())).thenReturn(messageQuery)
+        Mockito.`when`(messageQuery.greaterThan(Mockito.eq("suppressionExpiresAt"), Mockito.anyLong())).thenReturn(messageQuery)
+        Mockito.`when`(messageQuery.lessThanOrEqualTo(Mockito.eq("suppressionExpiresAt"), Mockito.anyLong())).thenReturn(messageQuery)
         Mockito.`when`(messageQuery.findAll()).thenReturn(realmResults)
         Mockito.`when`(realmResults.isEmpty()).thenReturn(false)
         Mockito.`when`(realmResults.iterator()).thenAnswer { mutableListOf(orphanedMsg).iterator() }
@@ -3031,15 +3134,15 @@ class AutomationPipelineE2ETest {
         }.`when`(mockRealm).executeTransaction(Mockito.any())
 
         // Execute recovery with production HousekeepingWorker method
-        val recoveredThreadIds = dev.octoshrimpy.quik.worker.HousekeepingWorker.scanAndResetOrphanedSuppressedMessages(60_000L) { mockRealm }
-        assertFalse("Orphaned message older than 60s must have pendingSuppression reset to false by production code", orphanedMsg.pendingSuppression)
-        assertTrue("Recent message younger than 60s must retain pendingSuppression = true", recentMsg.pendingSuppression)
+        val recoveredThreadIds = dev.octoshrimpy.quik.worker.HousekeepingWorker.scanAndResetOrphanedSuppressedMessages() { mockRealm }
+        assertFalse("Expired suppressed message must have pendingSuppression reset to false by production code", orphanedMsg.pendingSuppression)
+        assertTrue("Message with pending suppression expiry in the future must retain pendingSuppression = true", recentMsg.pendingSuppression)
         assertEquals(listOf(101L), recoveredThreadIds)
 
         // Verify HousekeepingWorker delegates to NotificationManager
         val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
         val mockRepoForWorker = Mockito.mock(MessageRepository::class.java)
-        Mockito.`when`(mockRepoForWorker.resetOrphanedSuppressedMessages(60_000L)).thenReturn(listOf(101L))
+        Mockito.`when`(mockRepoForWorker.resetOrphanedSuppressedMessages()).thenReturn(listOf(101L))
 
         val workerContext = Mockito.mock(android.content.Context::class.java)
         val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
@@ -3047,7 +3150,7 @@ class AutomationPipelineE2ETest {
             this.messageRepo = mockRepoForWorker
             this.notificationManager = mockNotificationManager
         }
-        val workerRecoveredIds = housekeepingWorker.resetOrphanedSuppressedMessages(60_000L)
+        val workerRecoveredIds = housekeepingWorker.resetOrphanedSuppressedMessages()
         assertEquals(listOf(101L), workerRecoveredIds)
         Mockito.verify(mockNotificationManager).update(101L)
 
@@ -3128,7 +3231,7 @@ class AutomationPipelineE2ETest {
         val mockPrefs: dev.octoshrimpy.quik.util.Preferences = Mockito.mock(dev.octoshrimpy.quik.util.Preferences::class.java)
         val migration = dev.octoshrimpy.quik.migration.QkRealmMigration(mockCursor, mockPrefs)
 
-        assertEquals("SCHEMA_VERSION must be 21", 21L, dev.octoshrimpy.quik.migration.QkRealmMigration.SCHEMA_VERSION)
+        assertEquals("SCHEMA_VERSION must be 22", 22L, dev.octoshrimpy.quik.migration.QkRealmMigration.SCHEMA_VERSION)
 
         migration.migrate(mockDynamicRealm, 20L, 21L)
 

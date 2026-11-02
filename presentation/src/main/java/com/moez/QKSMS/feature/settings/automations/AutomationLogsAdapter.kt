@@ -12,6 +12,9 @@ import dev.octoshrimpy.quik.model.AutomationLog
 
 class AutomationLogsAdapter : QkRealmAdapter<AutomationLog, QkBindingViewHolder<AutomationLogListItemBinding>>() {
 
+    val clicks = io.reactivex.subjects.PublishSubject.create<AutomationLog>()
+
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): QkBindingViewHolder<AutomationLogListItemBinding> {
         val binding = AutomationLogListItemBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         return QkBindingViewHolder(binding)
@@ -38,5 +41,6 @@ class AutomationLogsAdapter : QkRealmAdapter<AutomationLog, QkBindingViewHolder<
         holder.binding.logTimestamp.text = DateFormat.format("MMM d, HH:mm:ss", log.timestamp)
         holder.binding.logRuleName.text = log.ruleName.ifBlank { "Automation" }
         holder.binding.logDetails.text = log.details
+        holder.binding.root.setOnClickListener { clicks.onNext(log) }
     }
 }

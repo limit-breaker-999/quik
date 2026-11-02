@@ -107,7 +107,7 @@ interface MessageRepository {
 
     fun markAsSendingNow(messageId: Long)
 
-    fun resetOrphanedSuppressedMessages(ttlMs: Long = 60_000L): List<Long> = emptyList()
+    fun resetOrphanedSuppressedMessages(): List<Long> = emptyList()
 
-    fun markPendingSuppression(messageId: Long) = Unit
+    fun markPendingSuppression(messageId: Long, expiresAt: Long) = Unit
 }
