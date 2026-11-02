@@ -34,6 +34,10 @@ android {
         targetSdkVersion 34
     }
     namespace 'dev.octoshrimpy.quik.domain'
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -69,6 +73,7 @@ dependencies {
     implementation project(":common")
 
     testImplementation "junit:junit:$junit_version"
+    testImplementation "org.json:json:20231013"
 }
 
 repositories {

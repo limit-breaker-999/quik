@@ -214,6 +214,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
 
         var currentStepIndex = 0
         var currentActionType = steps.firstOrNull()?.action ?: "CHAIN"
+        var deletionAborted = false
 
         return try {
             for ((index, step) in steps.withIndex()) {
@@ -247,7 +248,8 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                             val matchingRule = if (::automationRepo.isInitialized && ruleId > 0) automationRepo.getRule(ruleId) else null
                             val isWhitelisted = dev.octoshrimpy.quik.interactor.ExecuteAutomations.isSenderWhitelisted(
                                 senderAddress,
-                                listOfNotNull(matchingRule)
+                                listOfNotNull(matchingRule),
+                                messageBody
                             )
                             if (dev.octoshrimpy.quik.interactor.ExecuteAutomations.isCarrierOrShortcode(senderAddress) &&
                                 !isWhitelisted) {
@@ -265,12 +267,14 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                         )
                                     )
                                 }
+                                deletionAborted = true
+                                restoreSuppressedMessageToInbox(messageId, threadId)
                                 continue
                             }
 
                             // Anti-cascade check: self-forward loop detection
                             val ownNumber = dev.octoshrimpy.quik.interactor.ExecuteAutomations.getOwnNumber(applicationContext)
-                            if (dev.octoshrimpy.quik.interactor.ExecuteAutomations.isSelfForwardLoop(messageBody, phone, ownNumber)) {
+                            if (dev.octoshrimpy.quik.interactor.ExecuteAutomations.isSelfForwardLoop(messageBody, phone, ownNumber, senderAddress)) {
                                 if (::automationRepo.isInitialized) {
                                     automationRepo.log(
                                         ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
@@ -285,6 +289,8 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                         )
                                     )
                                 }
+                                deletionAborted = true
+                                restoreSuppressedMessageToInbox(messageId, threadId)
                                 continue
                             }
 
@@ -307,6 +313,8 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                         )
                                     )
                                 }
+                                deletionAborted = true
+                                restoreSuppressedMessageToInbox(messageId, threadId)
                                 continue
                             }
 
@@ -344,6 +352,8 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                     )
                                     automationRepo.saveFailedMessage(failed)
                                 }
+                                deletionAborted = true
+                                restoreSuppressedMessageToInbox(messageId, threadId)
                                 continue
                             }
 
@@ -543,6 +553,16 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                             markStepCompleted(workId, index, applicationContext)
                         }
                         AutomationRule.ACTION_DELETE -> {
+                            if (deletionAborted) {
+                                Timber.w("AutomationActionWorker: Deletion aborted because a preceding forward step was skipped or failed")
+                                if (::automationRepo.isInitialized) {
+                                    automationRepo.log(
+                                        ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
+                                        step.action, "Aborted message deletion because forward step was skipped or failed"
+                                    )
+                                }
+                                continue
+                            }
                             if (messageId >= 0) {
                                 messageRepo.deleteMessages(listOf(messageId))
                             }
@@ -585,6 +605,24 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                 ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
                 hasDelete, actionsJson ?: ""
             )
+        }
+    }
+
+    private fun restoreSuppressedMessageToInbox(messageId: Long, threadId: Long) {
+        if (messageId >= 0) {
+            try {
+                messageRepo.unsuppressMessage(messageId)
+            } catch (e: Exception) {
+                Timber.w(e, "Error unsuppressing message $messageId")
+            }
+        }
+        if (threadId >= 0) {
+            try {
+                conversationRepo.updateConversations(listOf(threadId))
+            } catch (_: Exception) {}
+            try {
+                notificationManager.update(threadId)
+            } catch (_: Exception) {}
         }
     }
 
@@ -646,7 +684,6 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
             }
         }
 
-        // If the rule contained ACTION_DELETE, never let the failed message appear in normal inbox or notification
         if (hasDelete) {
             Timber.d("AutomationActionWorker: rule contains ACTION_DELETE; deleting message $messageId on failure")
             try {
@@ -672,6 +709,9 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
             } catch (e: Exception) {
                 Timber.e(e, "Error deleting message $messageId on failure")
             }
+        } else {
+            Timber.d("AutomationActionWorker: rule lacks delete; unsuppressing message $messageId and surfacing to inbox")
+            restoreSuppressedMessageToInbox(messageId, threadId)
         }
 
         clearLedger(workId, applicationContext)

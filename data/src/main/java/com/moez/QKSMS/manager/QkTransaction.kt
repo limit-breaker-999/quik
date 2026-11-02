@@ -348,11 +348,11 @@ object QkTransaction {
             smsManager.sendMultipartTextMessage(
                 address, null, parts, sPI, dPI.ifEmpty { null }
             )
+            return true
         } catch (e: Exception) {
             Timber.e(e, "send sms exception")
+            throw e
         }
-
-        return true
     }
 
     private fun createMmsMessage(

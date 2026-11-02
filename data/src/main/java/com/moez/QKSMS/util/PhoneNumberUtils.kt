@@ -27,7 +27,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class PhoneNumberUtils @Inject constructor(context: Context) {
+open class PhoneNumberUtils @Inject constructor(context: Context) {
 
     private val countryCode = Locale.getDefault().country
     private val phoneNumberUtil = PhoneNumberUtil.createInstance(context)

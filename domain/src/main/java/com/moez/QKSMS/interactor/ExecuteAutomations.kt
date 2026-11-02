@@ -5,6 +5,7 @@ import androidx.work.Data
 import androidx.work.BackoffPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import dev.octoshrimpy.quik.model.AutomationActionStep
 import dev.octoshrimpy.quik.model.AutomationActionStepSerializer
@@ -87,7 +88,19 @@ class ExecuteAutomations @Inject constructor(
             return false
         }
 
-        fun isSenderWhitelisted(address: String, rules: List<AutomationRule> = emptyList()): Boolean {
+        fun isCarrierFeedback(address: String, body: String = ""): Boolean {
+            val trimmed = address.trim()
+            val lower = trimmed.lowercase()
+            if (trimmed.startsWith("*") || trimmed.endsWith("#") || trimmed.contains("#")) return true
+            if (lower in listOf("carrier", "operator", "balance", "ussd", "smsc", "verizon", "vodafone", "t-mobile", "airtel", "jio", "att", "telecom", "sprint")) return true
+            if (trimmed == "121" || trimmed == "198" || trimmed == "199") return true
+            val isShortNumeric = trimmed.all { it.isDigit() } && trimmed.length in 3..4
+            if (isShortNumeric && (body.contains("balance", ignoreCase = true) || body.contains("carrier", ignoreCase = true))) return true
+            if (body.contains("carrier balance", ignoreCase = true) && (lower.contains("carrier") || isShortNumeric)) return true
+            return false
+        }
+
+        fun isSenderWhitelisted(address: String, rules: List<AutomationRule> = emptyList(), body: String = ""): Boolean {
             if (whitelistedSenders.contains(address)) return true
             for (rule in rules) {
                 val pattern = rule.matchSender.trim()
@@ -97,24 +110,55 @@ class ExecuteAutomations @Inject constructor(
                     } else if (address.equals(pattern, ignoreCase = !rule.matchSenderCaseSensitive) || comparePhoneNumbers(pattern, address)) {
                         return true
                     }
+                } else {
+                    // Blank or wildcard matchSender: allow shortcodes & OTPs, but reject carrier feedback loops
+                    if (!isCarrierFeedback(address, body)) {
+                        return true
+                    }
                 }
             }
             return false
         }
 
-        fun isSelfForwardLoop(body: String, targetPhone: String, ownNumber: String? = null): Boolean {
-            val bodyDigits = body.filter { it.isDigit() }
+        fun isSelfForwardLoop(
+            body: String,
+            targetPhone: String,
+            ownNumber: String? = null,
+            sender: String? = null
+        ): Boolean {
+            val cleanTarget = targetPhone.filter { it.isDigit() }
+            val cleanOwn = ownNumber?.filter { it.isDigit() }.orEmpty()
+            val cleanSender = sender?.filter { it.isDigit() }.orEmpty()
+
+            // 1. Sender matches target phone or own number
+            if (cleanSender.isNotEmpty()) {
+                if (cleanTarget.isNotEmpty() && (cleanSender == cleanTarget || (cleanSender.length >= 7 && cleanTarget.endsWith(cleanSender)) || (cleanTarget.length >= 7 && cleanSender.endsWith(cleanTarget)))) {
+                    return true
+                }
+                if (cleanOwn.isNotEmpty() && (cleanSender == cleanOwn || (cleanSender.length >= 7 && cleanOwn.endsWith(cleanSender)) || (cleanOwn.length >= 7 && cleanSender.endsWith(cleanOwn)))) {
+                    return true
+                }
+            }
+
+            // 2. Target phone matches own number (forwarding to self)
+            if (cleanTarget.isNotEmpty() && cleanOwn.isNotEmpty()) {
+                if (cleanTarget == cleanOwn || (cleanTarget.length >= 7 && cleanOwn.endsWith(cleanTarget)) || (cleanOwn.length >= 7 && cleanTarget.endsWith(cleanOwn))) {
+                    return true
+                }
+            }
+
+            // 3. Target phone loop detection in body
             if (targetPhone.isNotBlank()) {
-                val cleanTarget = targetPhone.filter { it.isDigit() }
+                val bodyDigits = body.filter { it.isDigit() }
                 if (body.contains(targetPhone, ignoreCase = true)) return true
                 if (cleanTarget.length >= 7 && bodyDigits.contains(cleanTarget)) return true
                 if (cleanTarget.length >= 10 && bodyDigits.contains(cleanTarget.takeLast(10))) return true
             }
+
+            // 4. Own number loop detection: only if body starts with or contains "From: $ownNumber"
             if (!ownNumber.isNullOrBlank()) {
-                val cleanOwn = ownNumber.filter { it.isDigit() }
-                if (body.contains("From: $ownNumber", ignoreCase = true)) return true
-                if (cleanOwn.length >= 7 && (body.contains("From: $cleanOwn") || bodyDigits.contains(cleanOwn))) return true
-                if (cleanOwn.length >= 10 && bodyDigits.contains(cleanOwn.takeLast(10))) return true
+                if (body.startsWith("From: $ownNumber", ignoreCase = true) || body.contains("From: $ownNumber", ignoreCase = true)) return true
+                if (cleanOwn.length >= 7 && (body.startsWith("From: $cleanOwn", ignoreCase = true) || body.contains("From: $cleanOwn", ignoreCase = true))) return true
             }
             return false
         }
@@ -357,7 +401,7 @@ class ExecuteAutomations @Inject constructor(
         val filteredSteps = deduplicatedSteps.filterNot { step ->
             if (step.action == AutomationRule.ACTION_FORWARD_SMS) {
                 if (isCarrierOrShortcode(snap.address)) {
-                    if (isSenderWhitelisted(snap.address, matchedRules)) {
+                    if (isSenderWhitelisted(snap.address, matchedRules, snap.body)) {
                         whitelistedSenders.add(snap.address)
                     } else {
                         automationRepo.log(
@@ -367,7 +411,7 @@ class ExecuteAutomations @Inject constructor(
                         return@filterNot true
                     }
                 }
-                if (isSelfForwardLoop(snap.body, step.forwardToPhone, ownNumber)) {
+                if (isSelfForwardLoop(snap.body, step.forwardToPhone, ownNumber, snap.address)) {
                     automationRepo.log(
                         primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_INFO,
                         step.action, "Self-forward loop detected for target ${step.forwardToPhone}, aborting forward"
@@ -378,11 +422,19 @@ class ExecuteAutomations @Inject constructor(
             false
         }
 
-        if (filteredSteps.isEmpty()) return ExecutionResult.Normal(false)
+        val hadForward = deduplicatedSteps.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP }
+        val hasForward = filteredSteps.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP }
+        val finalSteps = if (hadForward && !hasForward) {
+            filteredSteps.filterNot { it.action == AutomationRule.ACTION_DELETE }
+        } else {
+            filteredSteps
+        }
+
+        if (finalSteps.isEmpty()) return ExecutionResult.Normal(false)
 
         automationRepo.log(
             primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_INFO,
-            "PLAN", "Compiled action plan: ${compiledPlanFor(filteredSteps)}",
+            "PLAN", "Compiled action plan: ${compiledPlanFor(finalSteps)}",
             dev.octoshrimpy.quik.model.AutomationDiag.json(
                 "stage" to "plan_compile",
                 "outcome" to "ok",
@@ -391,14 +443,14 @@ class ExecuteAutomations @Inject constructor(
                 "matchedRuleIds" to matchedRules.map { it.id.toString() },
                 "stepsBeforeDedup" to allSteps.size,
                 "stepsAfterDedup" to deduplicatedSteps.size,
-                "stepsAfterAntiCascade" to filteredSteps.size,
-                "compiledPlan" to filteredSteps.sortedWith(compareBy { actionRank(it.action) }).map { it.action }
+                "stepsAfterAntiCascade" to finalSteps.size,
+                "compiledPlan" to finalSteps.sortedWith(compareBy { actionRank(it.action) }).map { it.action }
             )
         )
 
         // Compile unified plan strictly adhering to canonical order:
         // Egress (HTTP, SMS, AUTO_REPLY) -> Thread Mutations (MARK_READ, ARCHIVE) -> Terminal Action (DELETE)
-        val compiledPlan = filteredSteps.sortedWith(compareBy { actionRank(it.action) })
+        val compiledPlan = finalSteps.sortedWith(compareBy { actionRank(it.action) })
 
         val hasDelete = compiledPlan.any { it.action == AutomationRule.ACTION_DELETE }
 
@@ -670,7 +722,13 @@ class ExecuteAutomations @Inject constructor(
         val request = OneTimeWorkRequest.Builder(workerClass)
             .setInputData(data)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
-            .apply { if (delayMs > 0) setInitialDelay(delayMs, TimeUnit.MILLISECONDS) }
+            .apply {
+                if (delayMs > 0) {
+                    setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
+                } else {
+                    setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                }
+            }
             .build()
 
         val uniqueWorkName = "automation_msg_${snap.id}"

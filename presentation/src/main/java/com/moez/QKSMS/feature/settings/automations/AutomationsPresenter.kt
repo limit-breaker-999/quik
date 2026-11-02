@@ -127,6 +127,7 @@ class AutomationsPresenter(
                             .putBoolean(ExecuteAutomations.KEY_APPEND_SENDER, firstStep.appendSenderToForward)
                             .putString(ExecuteAutomations.KEY_REPLY_TEMPLATE, firstStep.replyTemplate)
                             .putString(ExecuteAutomations.KEY_SENDER_ADDRESS, failed.sender)
+                            .putInt(ExecuteAutomations.KEY_SUB_ID, failed.subId)
                             .putString(ExecuteAutomations.KEY_MESSAGE_BODY, failed.body)
                             .putLong(
                                 ExecuteAutomations.KEY_FORWARD_RATE_LIMIT_MS,
@@ -140,6 +141,7 @@ class AutomationsPresenter(
                         val request = OneTimeWorkRequest.Builder(workerClass)
                             .setInputData(data)
                             .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                             .build()
 
 

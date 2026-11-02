@@ -22,6 +22,7 @@ import dev.octoshrimpy.quik.databinding.AutomationsControllerBinding
 import dev.octoshrimpy.quik.feature.settings.automations.edit.EditAutomationController
 import dev.octoshrimpy.quik.injection.appComponent
 import io.reactivex.Observable
+import io.reactivex.disposables.Disposable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
 import javax.inject.Inject
@@ -37,6 +38,7 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
     private val clearLogsSubject: Subject<Unit> = PublishSubject.create()
     private val filterLogsSubject: Subject<String> = PublishSubject.create()
     private val exportLogsSubject: Subject<Unit> = PublishSubject.create()
+    private var logsClicksDisposable: Disposable? = null
 
     companion object {
         private const val REQUEST_SAVE_EXPORT = 2002
@@ -73,7 +75,8 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
         // SAF save handled via startActivityForResult/onActivityResult (Conductor
         // controllers don't support the androidx ActivityResult API)
 
-        logsAdapter.clicks
+        logsClicksDisposable?.dispose()
+        logsClicksDisposable = logsAdapter.clicks
             .subscribe { log -> showLogDetails(log) }
 
         adapter.emptyView = binding.empty
@@ -112,6 +115,8 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
     }
 
     override fun onDestroyView(view: View) {
+        logsClicksDisposable?.dispose()
+        logsClicksDisposable = null
         adapter.emptyView = null
         failedAdapter.emptyView = null
         logsAdapter.emptyView = null

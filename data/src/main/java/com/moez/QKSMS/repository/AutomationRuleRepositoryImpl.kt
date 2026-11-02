@@ -220,7 +220,7 @@ class AutomationRuleRepositoryImpl(
 
                 val priorityToSave = rule.priority
                 val stopOnMatchToSave = rule.stopOnMatch
-                val forwardRateLimitMsToSave = if (rule.forwardRateLimitMs > 0L) rule.forwardRateLimitMs else (existing?.forwardRateLimitMs ?: 60000L)
+                val forwardRateLimitMsToSave = if (rule.forwardRateLimitMs >= 0L) rule.forwardRateLimitMs else (existing?.forwardRateLimitMs ?: 60000L)
 
                 realm.copyToRealmOrUpdate(
                     AutomationRule(

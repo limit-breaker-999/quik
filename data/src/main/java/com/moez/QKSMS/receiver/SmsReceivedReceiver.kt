@@ -22,6 +22,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.provider.Telephony.Sms
+import android.telephony.SubscriptionManager
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
@@ -52,9 +53,7 @@ class SmsReceivedReceiver : BroadcastReceiver() {
                 Timber.v("onReceive() new sms")  // here so runs on io thread
 
                 messageRepo.insertReceivedSms(
-                    intent.getIntExtra("android.telephony.extra.SUBSCRIPTION_ID", -1)
-                        .takeIf { it > 0 }
-                        ?: intent.extras?.getInt("subscription", -1) ?: -1,
+                    extractSubId(intent),
                     messages.firstOrNull()?.displayOriginatingAddress.orEmpty(),
                     messages.mapNotNull { it.displayMessageBody }.joinToString(""),
                     messages.firstOrNull()?.timestampMillis ?: System.currentTimeMillis()
@@ -74,4 +73,26 @@ class SmsReceivedReceiver : BroadcastReceiver() {
             })
     }
 
+    companion object {
+        fun extractSubId(intent: Intent): Int {
+            val extras = intent.extras ?: return -1
+            val keys = listOf(
+                SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX,
+                "subscription_index",
+                "android.telephony.extra.SUBSCRIPTION_ID",
+                "subscription",
+                "sub_id"
+            )
+            for (key in keys) {
+                val value = extras.get(key) ?: continue
+                when (value) {
+                    is Int -> if (value >= 0) return value
+                    is Long -> if (value >= 0) return value.toInt()
+                    is String -> value.toIntOrNull()?.let { if (it >= 0) return it }
+                    is Number -> if (value.toInt() >= 0) return value.toInt()
+                }
+            }
+            return -1
+        }
+    }
 }

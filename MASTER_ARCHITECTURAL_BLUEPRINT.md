@@ -454,4 +454,34 @@ When an outbound forward triggers an immediate inbound balance/delivery SMS from
 - Envelope: `{exportedAt, appVersion, device{model,manufacturer,android,sdkInt}, schema:1, rules[full config incl. both cooldowns], failedMessages[all fields], events[ascending by ts, each with parsed data payload]}` — machine-ingestible by external agents/backends.
 - **Per-entry drill-down**: tap any log row → dialog with details + pretty-printed payload + copy-as-JSON button.
 
+---
+
+## Section 11: SMS Forwarding Reliability Architecture & Defect Remediation
+
+### 11.1 Problem Analysis: Why Forwarding Failed After 1–2 Messages
+Investigation into automated SMS forwarding revealed ten compounding defects causing forward failures after 1–2 messages despite manual sending working correctly:
+1. **Cooldown Zero-Disabling Bug (`AutomationRuleRepositoryImpl.kt`)**: The condition `if (rule.forwardRateLimitMs > 0L)` prevented saving `0L` (disabled cooldown). Setting `0` evaluated to false and defaulted back to 60,000ms. Additionally, debounce flushes in `EditAutomationController` missed the rate limit fields on save.
+2. **False-Positive Self-Forward Loop Detection (`ExecuteAutomations.kt`)**: `bodyDigits.contains(cleanOwn.takeLast(10))` falsely flagged incoming bank alerts, OTPs, and notifications containing the user's phone number as self-forward loops, aborting execution immediately.
+3. **Shortcode & OTP Forwarding Gating (`ExecuteAutomations.kt` / `AutomationActionWorker.kt`)**: Shortcodes ($\le 6$ digits) and alphanumeric headers were rejected unless explicitly listed in `matchSender`. For wildcard rules (`matchSender == ""`), shortcodes/OTPs were rejected by `isSenderWhitelisted` while carrier balance loops (e.g. `121`) lacked distinct detection.
+4. **Android Doze Suspension (`ExecuteAutomations.kt`)**: `AutomationActionWorker` was enqueued as standard non-expedited work. When screen turned off, Doze deferred execution for 15–30+ minutes while the message was held under `pendingSuppression`.
+5. **Silent Message Loss on Forward Skips (`AutomationActionWorker.kt`)**: On rate-limit skips, forward skips, or carrier loops, workers executed `continue` directly to `ACTION_DELETE`, permanently destroying the message without forwarding it and leaving it hidden from inbox.
+6. **Two-Phase Send Verification (`QkTransaction.kt` & `AutomationActionWorker.kt`)**: `sendSmsMessage()` suppressed exceptions and returned `true` on failure; `AutomationActionWorker` lacked verification of `sent.isNotEmpty()` before progressing to deletion.
+7. **Multi-SIM subId Extraction (`SmsReceivedReceiver.kt` & `AutomationsPresenter.kt`)**: Bundle parsing failed on chipset-specific subscription extras (`EXTRA_SUBSCRIPTION_INDEX`, `EXTRA_SUBSCRIPTION_ID`, `"subscription"`, `"sub_id"`, and Long-to-Int cast variations). Failed automation retry lost `subId` context.
+8. **RxJava View Leak (`AutomationsController.kt`)**: `logsAdapter.clicks` was not disposed on `onDestroyView()`.
+9. **Suppression Expiry Watchdog Zero-Expiry Cleanup (`MessageRepositoryImpl.kt`)**: Orphaned messages with `suppressionExpiresAt == 0L` were ignored by `resetOrphanedSuppressedMessages()`, staying suppressed indefinitely if a worker crashed before setting an expiry.
+10. **Broken Test Dependency (`domain/build.gradle`)**: Missing `org.json:json:20231013` test dependency and `testOptions { unitTests.returnDefaultValues = true }` caused unmocked `JSONObject` crashes.
+
+### 11.2 Architectural Remediation Details
+- **Cooldown Zero-Disabling**: Checked `rule.forwardRateLimitMs >= 0L` in `AutomationRuleRepositoryImpl.kt`; exposed and debounced `forwardRateLimitField` and `replyRateLimitField` via Reactive subjects with explicit flushing on `saveClicks()` in `EditAutomationController.kt`.
+- **OTP/Bank Alert Loop Immunity**: In `ExecuteAutomations.isSelfForwardLoop()`, removed naive substring check `bodyDigits.contains(cleanOwn.takeLast(10))`. Strictly enforced loop checks: sender == target, sender == own number, target == own number, or body starts with/contains `"From: $ownNumber"`.
+- **Shortcode Forwarding & Carrier Feedback Precision**: Refined `ExecuteAutomations.isCarrierFeedback()` to detect USSD/carrier feedback (balance/recharge updates from `121`, `198`, `199`, or 3-4 digit shortcodes and operator names). Explicitly constrained balance text matching to carrier senders so incoming bank alerts ("Your balance is $...", from senders like CHASE, BOFA, HDFCBK) are never falsely rejected as carrier feedback.
+- **Expedited Work Requests**: Enqueued `AutomationActionWorker` with `.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)` when `delayMs == 0` in `ExecuteAutomations.kt`, and applied expedited execution to user retries in `AutomationsPresenter.kt` to bypass Android Doze deferral.
+- **Deletion Abort on Forward Skips**: Added `deletionAborted = true` in `AutomationActionWorker.kt`. Whenever a forward step is skipped (cooldown active, loop detected, carrier shortcode rejected, or budget limit exceeded), the worker unconditionally invokes `restoreSuppressedMessageToInbox(messageId, threadId)` to clear `pendingSuppression`, updates conversations and notifications, and skips subsequent `ACTION_DELETE` execution. Additionally, `ExecuteAutomations.kt` strips `ACTION_DELETE` if all forward steps in a plan were declined by anti-cascade checks.
+- **Two-Phase Send Verification**: `QkTransaction.sendSmsMessage()` rethrows exceptions on failure. In `MessageRepositoryImpl.kt`, `sendMessage()` marks the message failed and returns early from `tryOrNull` if `QkTransaction.sendMessage()` returns `false`, preventing false positive returns in `retVal`. `AutomationActionWorker` verifies `sent.isNotEmpty()` before progressing.
+- **Robust Multi-SIM Parsing**: `SmsReceivedReceiver.extractSubId()` inspects `SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX`, `"subscription_index"`, `"android.telephony.extra.SUBSCRIPTION_ID"`, `"subscription"`, and `"sub_id"`, safely handling Int, Long, String, and Number types. `AutomationsPresenter` restores `KEY_SUB_ID` on retry work requests.
+- **Watchdog Expiry**: Extended `MessageRepositoryImpl.resetOrphanedSuppressedMessages()` query to also select `suppressionExpiresAt == 0L && date <= now - 60_000L`.
+- **RxJava View Leak Cleanup**: Scoped `logsClicksDisposable` in `AutomationsController.kt` to dispose on `onDestroyView()`.
+- **Test Infrastructure & Coverage**: Added `org.json:json:20231013` and `returnDefaultValues = true` in `:domain/build.gradle`. Created `ForwardReliabilityRemediationsTest.kt` verifying rate limits, OTP loops, wildcard shortcode gating, multi-SIM extraction, watchdog expiry, bank balance alert whitelisting, anti-cascade delete stripping, and `AutomationDiag.json`.
+
+
 

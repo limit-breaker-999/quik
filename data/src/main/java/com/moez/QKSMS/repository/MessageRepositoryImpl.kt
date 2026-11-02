@@ -94,6 +94,8 @@ open class MessageRepositoryImpl @Inject constructor(
     override val deduplicationProgress: Subject<MessageRepository.DeduplicationProgress> =
         BehaviorSubject.createDefault(MessageRepository.DeduplicationProgress.Idle)
 
+    var realmProvider: () -> Realm = { Realm.getDefaultInstance() }
+
     companion object {
         const val TELEPHONY_UPDATE_CHUNK_SIZE = 200
     }
@@ -683,8 +685,11 @@ open class MessageRepositoryImpl @Inject constructor(
                     else null
 
                 // use values from os provider to resend the message, except subId
-                if (!QkTransaction.sendMessage(context, message.getUri(), sentIntent, deliveryIntent))
+                if (!QkTransaction.sendMessage(context, message.getUri(), sentIntent, deliveryIntent)) {
                     Timber.e("message id ${message.id} not sent by smsmms")
+                    markFailed(message.id, -1)
+                    return@tryOrNull
+                }
             }
 
             retVal.add(message)
@@ -1095,11 +1100,16 @@ open class MessageRepositoryImpl @Inject constructor(
         val now = System.currentTimeMillis()
         val threadIds = mutableSetOf<Long>()
         try {
-            Realm.getDefaultInstance().use { realm ->
+            realmProvider().use { realm ->
                 val orphaned = realm.where(Message::class.java)
                     .equalTo("pendingSuppression", true)
-                    .greaterThan("suppressionExpiresAt", 0L)
-                    .lessThanOrEqualTo("suppressionExpiresAt", now)
+                    .beginGroup()
+                        .greaterThan("suppressionExpiresAt", 0L)
+                        .lessThanOrEqualTo("suppressionExpiresAt", now)
+                    .or()
+                        .equalTo("suppressionExpiresAt", 0L)
+                        .lessThanOrEqualTo("date", now - 60_000L)
+                    .endGroup()
                     .findAll()
 
                 if (orphaned.isNotEmpty()) {
@@ -1120,7 +1130,7 @@ open class MessageRepositoryImpl @Inject constructor(
 
     override fun markPendingSuppression(messageId: Long, expiresAt: Long) {
         try {
-            Realm.getDefaultInstance().use { realm ->
+            realmProvider().use { realm ->
                 realm.where(Message::class.java)
                     .equalTo("id", messageId)
                     .findFirst()
@@ -1133,6 +1143,24 @@ open class MessageRepositoryImpl @Inject constructor(
             }
         } catch (e: Exception) {
             Timber.w(e, "Error marking pending suppression for message $messageId")
+        }
+    }
+
+    override fun unsuppressMessage(messageId: Long) {
+        try {
+            realmProvider().use { realm ->
+                realm.where(Message::class.java)
+                    .equalTo("id", messageId)
+                    .findFirst()
+                    ?.let { msg ->
+                        realm.executeTransaction {
+                            msg.pendingSuppression = false
+                            msg.suppressionExpiresAt = 0L
+                        }
+                    }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Error unsuppressing message $messageId")
         }
     }
 }
