@@ -75,6 +75,8 @@ class ExecuteAutomations @Inject constructor(
         const val KEY_MESSAGE_BODY = "messageBody"
         const val KEY_SUB_ID = "subId"
         const val KEY_FORWARD_RATE_LIMIT_MS = "forwardRateLimitMs"
+        const val KEY_DELAY_MS = "delayMs"
+        const val KEY_DELETE_ON_FAILURE = "deleteOnFailure"
         val whitelistedSenders = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
         fun isCarrierOrShortcode(address: String): Boolean {
@@ -404,28 +406,77 @@ class ExecuteAutomations @Inject constructor(
                     if (isSenderWhitelisted(snap.address, matchedRules, snap.body)) {
                         whitelistedSenders.add(snap.address)
                     } else {
+                        val errorMsg = "Carrier shortcode/alphanumeric sender rejected for automated forwarding: ${snap.address}"
                         automationRepo.log(
                             primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_INFO,
-                            step.action, "Carrier shortcode/alphanumeric sender rejected for automated forwarding: ${snap.address}"
+                            step.action, errorMsg
                         )
+                        val failed = FailedAutomationMessage(
+                            messageId = snap.id,
+                            threadId = snap.threadId,
+                            subId = snap.subId,
+                            sender = snap.address,
+                            body = snap.body,
+                            ruleId = primaryRule.id,
+                            ruleName = primaryRule.name,
+                            failedStepIndex = deduplicatedSteps.indexOf(step),
+                            failedActionType = step.action,
+                            errorMessage = errorMsg,
+                            timestamp = System.currentTimeMillis(),
+                            canRetry = true,
+                            actionsJson = AutomationActionStepSerializer.toJson(deduplicatedSteps)
+                        )
+                        automationRepo.saveFailedMessage(failed)
                         return@filterNot true
                     }
                 }
                 if (isSelfForwardLoop(snap.body, step.forwardToPhone, ownNumber, snap.address)) {
+                    val errorMsg = "Self-forward loop detected for target ${step.forwardToPhone}, aborting forward"
                     automationRepo.log(
                         primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_INFO,
-                        step.action, "Self-forward loop detected for target ${step.forwardToPhone}, aborting forward"
+                        step.action, errorMsg
                     )
+                    val failed = FailedAutomationMessage(
+                        messageId = snap.id,
+                        threadId = snap.threadId,
+                        subId = snap.subId,
+                        sender = snap.address,
+                        body = snap.body,
+                        ruleId = primaryRule.id,
+                        ruleName = primaryRule.name,
+                        failedStepIndex = deduplicatedSteps.indexOf(step),
+                        failedActionType = step.action,
+                        errorMessage = errorMsg,
+                        timestamp = System.currentTimeMillis(),
+                        canRetry = true,
+                        actionsJson = AutomationActionStepSerializer.toJson(deduplicatedSteps)
+                    )
+                    automationRepo.saveFailedMessage(failed)
                     return@filterNot true
                 }
             }
             false
         }
 
+        val minDelayMs = matchedRules.map { it.delayMs }.minOrNull() ?: 0L
         val hadForward = deduplicatedSteps.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP }
         val hasForward = filteredSteps.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP }
+        val hadDelete = deduplicatedSteps.any { it.action == AutomationRule.ACTION_DELETE }
+
+        // Determine if any matched rule requesting ACTION_DELETE is a 0-second rule
+        val hasZeroSecondDelete = hadDelete && matchedRules.any { rule ->
+            rule.delayMs == 0L && rule.getActionSteps().any { it.action == AutomationRule.ACTION_DELETE }
+        }
+
         val finalSteps = if (hadForward && !hasForward) {
-            filteredSteps.filterNot { it.action == AutomationRule.ACTION_DELETE }
+            if (hasZeroSecondDelete) {
+                // Immediate rule (0s) with ACTION_DELETE: message MUST still be deleted!
+                // Do NOT strip ACTION_DELETE.
+                filteredSteps
+            } else {
+                // Delayed chain (>0s) or no delete: strip ACTION_DELETE to preserve message in inbox
+                filteredSteps.filterNot { it.action == AutomationRule.ACTION_DELETE }
+            }
         } else {
             filteredSteps
         }
@@ -454,17 +505,16 @@ class ExecuteAutomations @Inject constructor(
 
         val hasDelete = compiledPlan.any { it.action == AutomationRule.ACTION_DELETE }
 
-        val minDelayMs0 = matchedRules.map { it.delayMs }.minOrNull() ?: 0L
         automationRepo.log(
             primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_INFO,
-            "DISPATCH", "hasDelete=$hasDelete delayMs=$minDelayMs0 async=${compiledPlan.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP || it.action == AutomationRule.ACTION_AUTO_REPLY }}",
+            "DISPATCH", "hasDelete=$hasDelete delayMs=$minDelayMs async=${compiledPlan.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP || it.action == AutomationRule.ACTION_AUTO_REPLY }}",
             dev.octoshrimpy.quik.model.AutomationDiag.json(
                 "stage" to "dispatch",
                 "outcome" to "ok",
                 "hasDelete" to hasDelete,
-                "minDelayMs" to minDelayMs0,
+                "minDelayMs" to minDelayMs,
                 "uniqueWorkName" to "automation_msg_${snap.id}",
-                "mode" to if (compiledPlan.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP || it.action == AutomationRule.ACTION_AUTO_REPLY } || minDelayMs0 > 0L) "worker" else "inline"
+                "mode" to if (compiledPlan.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP || it.action == AutomationRule.ACTION_AUTO_REPLY } || minDelayMs > 0L) "worker" else "inline"
             )
         )
 
@@ -472,7 +522,7 @@ class ExecuteAutomations @Inject constructor(
         // delayed chains so the watchdog never unsuppresses before the worker runs
         // (Doze/battery deferral included).
         val suppressionExpiresAt = System.currentTimeMillis() +
-            (if (minDelayMs0 > 0L) minDelayMs0 + 600_000L else 60_000L)
+            (if (minDelayMs > 0L) minDelayMs + 600_000L else 60_000L)
 
         if (hasDelete) {
             message.pendingSuppression = true
@@ -509,12 +559,10 @@ class ExecuteAutomations @Inject constructor(
             isArchived = true
         }
 
-        val minDelayMs = matchedRules.map { it.delayMs }.minOrNull() ?: 0L
-
         // Immediate Notification Suppression: If compiled plan contains ACTION_DELETE and delay is 0,
         // set isDropped = true upfront so no notification or sound leaks to the user.
         // If minDelayMs > 0, notification surfaces normally for the delay duration before deletion.
-        if (hasDelete && minDelayMs == 0L) {
+        if (hasDelete && hasZeroSecondDelete) {
             isDropped = true
         }
 
@@ -567,10 +615,10 @@ class ExecuteAutomations @Inject constructor(
             }
         } else {
             try {
-                val scheduled = scheduleAction(primaryRule, snap, compiledPlan, minDelayMs)
+                val scheduled = scheduleAction(primaryRule, snap, compiledPlan, minDelayMs, hasZeroSecondDelete)
                 if (!scheduled) {
-                    handleSchedulingFailure(primaryRule, snap, compiledPlan, hasDelete)
-                    if (hasDelete) {
+                    handleSchedulingFailure(primaryRule, snap, compiledPlan, hasZeroSecondDelete)
+                    if (hasZeroSecondDelete) {
                         isDropped = true
                     }
                 }
@@ -602,7 +650,7 @@ class ExecuteAutomations @Inject constructor(
                 )
                 automationRepo.saveFailedMessage(failed)
 
-                if (hasDelete) {
+                if (hasZeroSecondDelete) {
                     try {
                         messageRepo.deleteMessages(listOf(snap.id))
                     } catch (_: Exception) {}
@@ -693,7 +741,8 @@ class ExecuteAutomations @Inject constructor(
         rule: AutomationRule,
         snap: Snapshot,
         steps: List<AutomationActionStep> = rule.getActionSteps(),
-        delayMs: Long = rule.delayMs
+        delayMs: Long = rule.delayMs,
+        deleteOnFailure: Boolean = steps.any { it.action == AutomationRule.ACTION_DELETE } && delayMs == 0L
     ): Boolean {
         val actionsJson = AutomationActionStepSerializer.toJson(steps)
         val firstStep = steps.firstOrNull() ?: AutomationActionStep()
@@ -712,6 +761,8 @@ class ExecuteAutomations @Inject constructor(
             .putString(KEY_SENDER_ADDRESS, snap.address)
             .putInt(KEY_SUB_ID, snap.subId)
             .putLong(KEY_FORWARD_RATE_LIMIT_MS, rule.forwardRateLimitMs)
+            .putLong(KEY_DELAY_MS, delayMs)
+            .putBoolean(KEY_DELETE_ON_FAILURE, deleteOnFailure)
             // WorkManager Data is limited to 10KB; cap the body to keep the
             // payload safely under the limit (handles long MMS bodies).
             .putString(KEY_MESSAGE_BODY, truncateUtf8(snap.body, MAX_DATA_BODY_BYTES))

@@ -70,6 +70,8 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
         const val KEY_MESSAGE_BODY = "messageBody"
         const val KEY_SUB_ID = "subId"
         const val KEY_FORWARD_RATE_LIMIT_MS = "forwardRateLimitMs"
+        const val KEY_DELAY_MS = "delayMs"
+        const val KEY_DELETE_ON_FAILURE = "deleteOnFailure"
 
         // Shared client with explicit timeouts so a slow webhook can't hang the worker
         private val httpClient = OkHttpClient.Builder()
@@ -159,6 +161,9 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
     @Inject lateinit var notificationManager: NotificationManager
     @Inject lateinit var automationRepo: AutomationRuleRepository
 
+    private var messageDeleted = false
+    private var messageRestored = false
+
     override fun doWork(): Result {
         val actionsJson = inputData.getString(KEY_ACTIONS_JSON)
         val steps = if (!actionsJson.isNullOrBlank()) {
@@ -194,12 +199,18 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
         val subId = inputData.getInt(KEY_SUB_ID, -1)
         val senderAddress = inputData.getString(KEY_SENDER_ADDRESS) ?: ""
         val messageBody = inputData.getString(KEY_MESSAGE_BODY) ?: ""
+        val delayMs = inputData.getLong(KEY_DELAY_MS, 0L)
 
         val workId = id.toString()
         val completedSteps = getCompletedSteps(workId, applicationContext)
         val hasDelete = steps.any { it.action == AutomationRule.ACTION_DELETE }
+        val deleteOnFailure = if (inputData.keyValueMap.containsKey(KEY_DELETE_ON_FAILURE)) {
+            inputData.getBoolean(KEY_DELETE_ON_FAILURE, false)
+        } else {
+            hasDelete && delayMs == 0L
+        }
 
-        Timber.d("AutomationActionWorker: processing ${steps.size} steps for messageId=$messageId (completed=${completedSteps}, hasDelete=$hasDelete)")
+        Timber.d("AutomationActionWorker: processing ${steps.size} steps for messageId=$messageId (completed=${completedSteps}, hasDelete=$hasDelete, deleteOnFailure=$deleteOnFailure)")
 
         if (::automationRepo.isInitialized) {
             automationRepo.log(
@@ -238,7 +249,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 return handleStepFailure(
                                     workId, index, step.action, "Empty forward phone number",
                                     ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
+                                    hasDelete, actionsJson ?: "", deleteOnFailure
                                 )
                             }
 
@@ -253,11 +264,12 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                             )
                             if (dev.octoshrimpy.quik.interactor.ExecuteAutomations.isCarrierOrShortcode(senderAddress) &&
                                 !isWhitelisted) {
+                                val errorReason = "Carrier shortcode/alphanumeric sender rejected for automated forwarding: $senderAddress"
                                 if (::automationRepo.isInitialized) {
                                     automationRepo.log(
                                         ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
                                         step.action,
-                                        "Carrier shortcode/alphanumeric sender rejected for automated forwarding: $senderAddress, skipping forward step",
+                                        "$errorReason, skipping forward step",
                                         dev.octoshrimpy.quik.model.AutomationDiag.json(
                                             "stage" to "forward_guard",
                                             "outcome" to "skip",
@@ -266,20 +278,41 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                             "sender" to senderAddress
                                         )
                                     )
+                                    val failed = FailedAutomationMessage(
+                                        messageId = messageId,
+                                        threadId = threadId,
+                                        subId = subId,
+                                        sender = senderAddress,
+                                        body = messageBody,
+                                        ruleId = ruleId,
+                                        ruleName = ruleName,
+                                        failedStepIndex = index,
+                                        failedActionType = step.action,
+                                        errorMessage = errorReason,
+                                        timestamp = System.currentTimeMillis(),
+                                        canRetry = true,
+                                        actionsJson = actionsJson ?: ""
+                                    )
+                                    automationRepo.saveFailedMessage(failed)
                                 }
-                                deletionAborted = true
-                                restoreSuppressedMessageToInbox(messageId, threadId)
+                                if (deleteOnFailure) {
+                                    executeDeletion(ruleId, ruleName, messageId, threadId, "Following carrier/shortcode forward rejection per 0s delete rule")
+                                } else {
+                                    deletionAborted = true
+                                    restoreSuppressedMessageToInbox(messageId, threadId)
+                                }
                                 continue
                             }
 
                             // Anti-cascade check: self-forward loop detection
                             val ownNumber = dev.octoshrimpy.quik.interactor.ExecuteAutomations.getOwnNumber(applicationContext)
                             if (dev.octoshrimpy.quik.interactor.ExecuteAutomations.isSelfForwardLoop(messageBody, phone, ownNumber, senderAddress)) {
+                                val errorReason = "Self-forward loop detected: message body contains target destination or own number"
                                 if (::automationRepo.isInitialized) {
                                     automationRepo.log(
                                         ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
                                         step.action,
-                                        "Self-forward loop detected: message body contains target destination or own number, skipping forward step",
+                                        "$errorReason, skipping forward step",
                                         dev.octoshrimpy.quik.model.AutomationDiag.json(
                                             "stage" to "forward_guard",
                                             "outcome" to "skip",
@@ -288,20 +321,41 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                             "destination" to phone
                                         )
                                     )
+                                    val failed = FailedAutomationMessage(
+                                        messageId = messageId,
+                                        threadId = threadId,
+                                        subId = subId,
+                                        sender = senderAddress,
+                                        body = messageBody,
+                                        ruleId = ruleId,
+                                        ruleName = ruleName,
+                                        failedStepIndex = index,
+                                        failedActionType = step.action,
+                                        errorMessage = errorReason,
+                                        timestamp = System.currentTimeMillis(),
+                                        canRetry = true,
+                                        actionsJson = actionsJson ?: ""
+                                    )
+                                    automationRepo.saveFailedMessage(failed)
                                 }
-                                deletionAborted = true
-                                restoreSuppressedMessageToInbox(messageId, threadId)
+                                if (deleteOnFailure) {
+                                    executeDeletion(ruleId, ruleName, messageId, threadId, "Following self-forward loop rejection per 0s delete rule")
+                                } else {
+                                    deletionAborted = true
+                                    restoreSuppressedMessageToInbox(messageId, threadId)
+                                }
                                 continue
                             }
 
                             // Anti-cascade check: duplicate-content forward cooldown per destination
                             val forwardLimitMs = inputData.getLong(KEY_FORWARD_RATE_LIMIT_MS, 60000L)
                             if (::automationRepo.isInitialized && !automationRepo.tryAcquireForwardSlot(phone, contentKey, forwardLimitMs)) {
+                                val errorReason = "Duplicate forward (same content to $phone within ${forwardLimitMs}ms cooldown)"
                                 if (::automationRepo.isInitialized) {
                                     automationRepo.log(
                                         ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
                                         step.action,
-                                        "Duplicate forward (same content to $phone within ${forwardLimitMs}ms cooldown), skipping forward step",
+                                        "$errorReason, skipping forward step",
                                         dev.octoshrimpy.quik.model.AutomationDiag.json(
                                             "stage" to "forward_guard",
                                             "outcome" to "skip",
@@ -312,20 +366,41 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                             "cooldownMs" to forwardLimitMs
                                         )
                                     )
+                                    val failed = FailedAutomationMessage(
+                                        messageId = messageId,
+                                        threadId = threadId,
+                                        subId = subId,
+                                        sender = senderAddress,
+                                        body = messageBody,
+                                        ruleId = ruleId,
+                                        ruleName = ruleName,
+                                        failedStepIndex = index,
+                                        failedActionType = step.action,
+                                        errorMessage = errorReason,
+                                        timestamp = System.currentTimeMillis(),
+                                        canRetry = true,
+                                        actionsJson = actionsJson ?: ""
+                                    )
+                                    automationRepo.saveFailedMessage(failed)
                                 }
-                                deletionAborted = true
-                                restoreSuppressedMessageToInbox(messageId, threadId)
+                                if (deleteOnFailure) {
+                                    executeDeletion(ruleId, ruleName, messageId, threadId, "Following duplicate-content cooldown rejection per 0s delete rule")
+                                } else {
+                                    deletionAborted = true
+                                    restoreSuppressedMessageToInbox(messageId, threadId)
+                                }
                                 continue
                             }
 
                             // Anti-cascade check: outbound budget manager (cap automated SMS at 20 per 30 minutes)
                             if (::automationRepo.isInitialized && !automationRepo.checkOutboundBudget(20, 30 * 60 * 1000L)) {
                                 automationRepo.releaseForwardSlot(phone, contentKey)
+                                val errorReason = "Outbound SMS budget exceeded (max 20 per 30 minutes)"
                                 if (::automationRepo.isInitialized) {
                                     automationRepo.log(
                                         ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
                                         step.action,
-                                        "Outbound SMS budget exceeded (max 20 per 30 minutes), skipping forward step",
+                                        "$errorReason, skipping forward step",
                                         dev.octoshrimpy.quik.model.AutomationDiag.json(
                                             "stage" to "forward_guard",
                                             "outcome" to "skip",
@@ -345,15 +420,19 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                         ruleName = ruleName,
                                         failedStepIndex = index,
                                         failedActionType = step.action,
-                                        errorMessage = "Outbound SMS budget exceeded (max 20 per 30 minutes)",
+                                        errorMessage = errorReason,
                                         timestamp = System.currentTimeMillis(),
                                         canRetry = true,
                                         actionsJson = actionsJson ?: ""
                                     )
                                     automationRepo.saveFailedMessage(failed)
                                 }
-                                deletionAborted = true
-                                restoreSuppressedMessageToInbox(messageId, threadId)
+                                if (deleteOnFailure) {
+                                    executeDeletion(ruleId, ruleName, messageId, threadId, "Following outbound budget limit per 0s delete rule")
+                                } else {
+                                    deletionAborted = true
+                                    restoreSuppressedMessageToInbox(messageId, threadId)
+                                }
                                 continue
                             }
 
@@ -375,7 +454,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 if (::automationRepo.isInitialized) {
                                     automationRepo.releaseForwardSlot(phone, contentKey)
                                 }
-                                if (runAttemptCount < 3) {
+                                if (runAttemptCount < 3 && !deleteOnFailure) {
                                     if (::automationRepo.isInitialized) {
                                         automationRepo.log(
                                             ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
@@ -397,7 +476,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                     workId, index, step.action,
                                     sendError ?: "Carrier/provider rejected SMS send after ${runAttemptCount + 1} attempts",
                                     ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
+                                    hasDelete, actionsJson ?: "", deleteOnFailure
                                 )
                             }
                             if (::automationRepo.isInitialized) {
@@ -422,7 +501,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 return handleStepFailure(
                                     workId, index, step.action, "Empty webhook URL",
                                     ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
+                                    hasDelete, actionsJson ?: "", deleteOnFailure
                                 )
                             }
                             val json = """{"from":${org.json.JSONObject.quote(senderAddress)},"body":${org.json.JSONObject.quote(messageBody)},"timestamp":${System.currentTimeMillis()}}"""
@@ -444,7 +523,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 return handleStepFailure(
                                     workId, index, step.action, "HTTP forward failed: $httpError",
                                     ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
+                                    hasDelete, actionsJson ?: "", deleteOnFailure
                                 )
                             }
                             if (::automationRepo.isInitialized) {
@@ -461,7 +540,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 return handleStepFailure(
                                     workId, index, step.action, "Empty auto-reply template or sender",
                                     ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
+                                    hasDelete, actionsJson ?: "", deleteOnFailure
                                 )
                             }
 
@@ -471,7 +550,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                     workId, index, step.action,
                                     "Outbound SMS budget exceeded (max 20 per 30 minutes)",
                                     ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
+                                    hasDelete, actionsJson ?: "", deleteOnFailure
                                 )
                             }
 
@@ -492,7 +571,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 if (::automationRepo.isInitialized) {
                                     automationRepo.releaseReplySlot(ruleId, threadId)
                                 }
-                                if (runAttemptCount < 3) {
+                                if (runAttemptCount < 3 && !deleteOnFailure) {
                                     if (::automationRepo.isInitialized) {
                                         automationRepo.log(
                                             ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
@@ -514,7 +593,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                     workId, index, step.action,
                                     sendError ?: "Carrier/provider rejected auto-reply send after ${runAttemptCount + 1} attempts",
                                     ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
+                                    hasDelete, actionsJson ?: "", deleteOnFailure
                                 )
                             }
                             if (::automationRepo.isInitialized) {
@@ -553,7 +632,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                             markStepCompleted(workId, index, applicationContext)
                         }
                         AutomationRule.ACTION_DELETE -> {
-                            if (deletionAborted) {
+                            if (deletionAborted && !deleteOnFailure) {
                                 Timber.w("AutomationActionWorker: Deletion aborted because a preceding forward step was skipped or failed")
                                 if (::automationRepo.isInitialized) {
                                     automationRepo.log(
@@ -563,21 +642,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 }
                                 continue
                             }
-                            if (messageId >= 0) {
-                                messageRepo.deleteMessages(listOf(messageId))
-                            }
-                            if (threadId >= 0) {
-                                try {
-                                    conversationRepo.updateConversations(listOf(threadId))
-                                } catch (_: Exception) {}
-                                notificationManager.update(threadId)
-                            }
-                            if (::automationRepo.isInitialized) {
-                                automationRepo.log(
-                                    ruleId, ruleName, messageId, AutomationLog.TYPE_SUCCESS,
-                                    step.action, "Deleted message $messageId"
-                                )
-                            }
+                            executeDeletion(ruleId, ruleName, messageId, threadId, "Executing ACTION_DELETE step")
                             markStepCompleted(workId, index, applicationContext)
                         }
                     }
@@ -586,7 +651,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                     return handleStepFailure(
                         workId, index, step.action, e.message ?: "Execution error",
                         ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                        hasDelete, actionsJson ?: ""
+                        hasDelete, actionsJson ?: "", deleteOnFailure
                     )
                 }
             }
@@ -603,12 +668,50 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
             handleStepFailure(
                 workId, currentStepIndex, currentActionType, e.message ?: "Execution error",
                 ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                hasDelete, actionsJson ?: ""
+                hasDelete, actionsJson ?: "", deleteOnFailure
+            )
+        }
+    }
+
+    private fun executeDeletion(
+        ruleId: Long,
+        ruleName: String,
+        messageId: Long,
+        threadId: Long,
+        reason: String
+    ) {
+        if (messageDeleted) return
+        messageDeleted = true
+        if (messageId >= 0) {
+            try {
+                messageRepo.deleteMessages(listOf(messageId))
+            } catch (e: Exception) {
+                Timber.e(e, "Error deleting message $messageId: ${e.message}")
+            }
+        }
+        if (threadId >= 0) {
+            try {
+                conversationRepo.updateConversations(listOf(threadId))
+            } catch (_: Exception) {}
+            try {
+                notificationManager.update(threadId)
+            } catch (_: Exception) {}
+        }
+        if (::automationRepo.isInitialized) {
+            automationRepo.log(
+                ruleId = ruleId,
+                ruleName = ruleName,
+                messageId = messageId,
+                type = AutomationLog.TYPE_INFO,
+                actionType = AutomationRule.ACTION_DELETE,
+                details = "Deleted message $messageId from inbox: $reason"
             )
         }
     }
 
     private fun restoreSuppressedMessageToInbox(messageId: Long, threadId: Long) {
+        if (messageDeleted || messageRestored) return
+        messageRestored = true
         if (messageId >= 0) {
             try {
                 messageRepo.unsuppressMessage(messageId)
@@ -639,7 +742,8 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
         senderAddress: String,
         messageBody: String,
         hasDelete: Boolean,
-        actionsJson: String
+        actionsJson: String,
+        deleteOnFailure: Boolean = false
     ): Result {
         Timber.w("AutomationActionWorker: step $stepIndex ($actionType) failed: $errorMessage")
         if (::automationRepo.isInitialized) {
@@ -658,6 +762,7 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                         "actionType" to actionType,
                         "error" to errorMessage,
                         "hasDelete" to hasDelete,
+                        "deleteOnFailure" to deleteOnFailure,
                         "sender" to senderAddress,
                         "body" to messageBody.take(1000),
                         "actionsJson" to actionsJson
@@ -684,33 +789,11 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
             }
         }
 
-        if (hasDelete) {
-            Timber.d("AutomationActionWorker: rule contains ACTION_DELETE; deleting message $messageId on failure")
-            try {
-                if (messageId >= 0) {
-                    messageRepo.deleteMessages(listOf(messageId))
-                }
-                if (threadId >= 0) {
-                    try {
-                        conversationRepo.updateConversations(listOf(threadId))
-                    } catch (_: Exception) {}
-                    notificationManager.update(threadId)
-                }
-                if (::automationRepo.isInitialized) {
-                    automationRepo.log(
-                        ruleId = ruleId,
-                        ruleName = ruleName,
-                        messageId = messageId,
-                        type = AutomationLog.TYPE_INFO,
-                        actionType = AutomationRule.ACTION_DELETE,
-                        details = "Deleted message $messageId from inbox following step failure per rule configuration"
-                    )
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "Error deleting message $messageId on failure")
-            }
+        if (deleteOnFailure) {
+            Timber.d("AutomationActionWorker: deleteOnFailure is true; deleting message $messageId on failure")
+            executeDeletion(ruleId, ruleName, messageId, threadId, "Following step failure per rule configuration")
         } else {
-            Timber.d("AutomationActionWorker: rule lacks delete; unsuppressing message $messageId and surfacing to inbox")
+            Timber.d("AutomationActionWorker: rule lacks delete or has delay > 0; unsuppressing message $messageId and surfacing to inbox")
             restoreSuppressedMessageToInbox(messageId, threadId)
         }
 

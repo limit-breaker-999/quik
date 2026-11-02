@@ -11,6 +11,7 @@ import dev.octoshrimpy.quik.interactor.ExecuteAutomations
 import dev.octoshrimpy.quik.model.AutomationActionStep
 import dev.octoshrimpy.quik.model.AutomationActionStepSerializer
 import dev.octoshrimpy.quik.model.AutomationLog
+import dev.octoshrimpy.quik.model.AutomationRule
 import dev.octoshrimpy.quik.repository.AutomationRuleRepository
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.schedulers.Schedulers
@@ -115,6 +116,10 @@ class AutomationsPresenter(
                     val firstStep = remainingSteps.firstOrNull() ?: AutomationActionStep()
 
                     try {
+                        val matchingRule = automationRepo.getRule(failed.ruleId)
+                        val ruleDelayMs = matchingRule?.delayMs ?: 0L
+                        val hasDelete = remainingSteps.any { it.action == AutomationRule.ACTION_DELETE }
+
                         val data = Data.Builder()
                             .putLong(ExecuteAutomations.KEY_RULE_ID, failed.ruleId)
                             .putString(ExecuteAutomations.KEY_RULE_NAME, failed.ruleName)
@@ -131,8 +136,10 @@ class AutomationsPresenter(
                             .putString(ExecuteAutomations.KEY_MESSAGE_BODY, failed.body)
                             .putLong(
                                 ExecuteAutomations.KEY_FORWARD_RATE_LIMIT_MS,
-                                automationRepo.getRule(failed.ruleId)?.forwardRateLimitMs ?: 60000L
+                                matchingRule?.forwardRateLimitMs ?: 60000L
                             )
+                            .putLong(ExecuteAutomations.KEY_DELAY_MS, ruleDelayMs)
+                            .putBoolean(ExecuteAutomations.KEY_DELETE_ON_FAILURE, hasDelete && ruleDelayMs == 0L)
                             .build()
 
                         val workerClass = Class.forName("dev.octoshrimpy.quik.worker.AutomationActionWorker")

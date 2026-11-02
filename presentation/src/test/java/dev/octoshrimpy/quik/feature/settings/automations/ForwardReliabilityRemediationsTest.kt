@@ -244,10 +244,10 @@ class ForwardReliabilityRemediationsTest {
     }
 
     // ────────────────────────────────────────────────────────────────────
-    // 7. Prevent Silent Message Loss on Forward Declines/Skips
+    // 7. Prevent Silent Message Loss on Forward Declines/Skips (Delayed Rules)
     // ────────────────────────────────────────────────────────────────────
     @Test
-    fun testAntiCascadeFilterStripsActionDeleteWhenForwardRejected() {
+    fun testAntiCascadeFilterStripsActionDeleteForDelayedRuleWhenForwardRejected() {
         val mockContext = Mockito.mock(Context::class.java)
         val mockAutomationRepo = Mockito.mock(dev.octoshrimpy.quik.repository.AutomationRuleRepository::class.java)
         val mockContactsRepo = Mockito.mock(dev.octoshrimpy.quik.repository.ContactRepository::class.java)
@@ -263,12 +263,13 @@ class ForwardReliabilityRemediationsTest {
             null
         )
 
-        // Rule with FORWARD_SMS and ACTION_DELETE
+        // Delayed Rule (>0s) with FORWARD_SMS and ACTION_DELETE
         val rule = AutomationRule(
             id = 801L,
-            name = "Forward & Delete Rule",
+            name = "Delayed Forward & Delete Rule",
             enabled = true,
-            matchSender = ""
+            matchSender = "",
+            delayMs = 30_000L
         )
         val steps = listOf(
             dev.octoshrimpy.quik.model.AutomationActionStep(
@@ -285,7 +286,7 @@ class ForwardReliabilityRemediationsTest {
         Mockito.`when`(mockContactsRepo.isContact(Mockito.anyString())).thenReturn(false)
 
         // Incoming carrier balance loop message from "121": forward is rejected.
-        // ACTION_DELETE must also be stripped so the original message is NOT deleted!
+        // For delayed rules (>0s), ACTION_DELETE must be stripped so the original message is NOT deleted!
         val incomingCarrierMsg = Message().apply {
             id = 9001L
             threadId = 401L
@@ -294,9 +295,147 @@ class ForwardReliabilityRemediationsTest {
         }
 
         val result = interactor.execute(incomingCarrierMsg)
-        // Since forward is rejected and delete is stripped, no actions remain -> normal result, not dropped
-        assertTrue("Result must be Normal when forward was rejected", result is ExecuteAutomations.ExecutionResult.Normal)
-        assertFalse("Message must not be dropped/deleted when forward was rejected", result is ExecuteAutomations.ExecutionResult.Dropped)
+        // Since forward is rejected and delete is stripped on delayed rules, normal result, not dropped
+        assertTrue("Result must be Normal when forward was rejected on delayed rule", result is ExecuteAutomations.ExecutionResult.Normal)
+        assertFalse("Message must not be dropped/deleted when forward was rejected on delayed rule", result is ExecuteAutomations.ExecutionResult.Dropped)
         Mockito.verify(mockMessageRepo, Mockito.never()).deleteMessages(listOf(9001L))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 8. Zero-Second Rules with ACTION_DELETE MUST ALWAYS Delete on Forward Failure/Skip
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testZeroSecondRuleWithDeleteAlwaysDeletesOnForwardRejected() {
+        val mockContext = Mockito.mock(Context::class.java)
+        val mockAutomationRepo = Mockito.mock(dev.octoshrimpy.quik.repository.AutomationRuleRepository::class.java)
+        val mockContactsRepo = Mockito.mock(dev.octoshrimpy.quik.repository.ContactRepository::class.java)
+        val mockMessageRepo = Mockito.mock(dev.octoshrimpy.quik.repository.MessageRepository::class.java)
+        val mockConversationRepo = Mockito.mock(dev.octoshrimpy.quik.repository.ConversationRepository::class.java)
+
+        val interactor = ExecuteAutomations(
+            mockContext,
+            mockAutomationRepo,
+            mockContactsRepo,
+            mockMessageRepo,
+            mockConversationRepo,
+            null
+        )
+
+        // Immediate 0-second rule with FORWARD_SMS and ACTION_DELETE
+        val rule = AutomationRule(
+            id = 802L,
+            name = "Immediate Forward & Delete Rule",
+            enabled = true,
+            matchSender = "",
+            delayMs = 0L
+        )
+        val steps = listOf(
+            dev.octoshrimpy.quik.model.AutomationActionStep(
+                action = AutomationRule.ACTION_FORWARD_SMS,
+                forwardToPhone = "+15559998888"
+            ),
+            dev.octoshrimpy.quik.model.AutomationActionStep(
+                action = AutomationRule.ACTION_DELETE
+            )
+        )
+        rule.setActionSteps(steps)
+
+        Mockito.`when`(mockAutomationRepo.getEnabledRules()).thenReturn(listOf(rule))
+        Mockito.`when`(mockContactsRepo.isContact(Mockito.anyString())).thenReturn(false)
+
+        val incomingCarrierMsg = Message().apply {
+            id = 9002L
+            threadId = 402L
+            address = "121"
+            body = "Your carrier balance is low"
+        }
+
+        val result = interactor.execute(incomingCarrierMsg)
+        // 0-second rule with ACTION_DELETE must NEVER surface to inbox -> Dropped result!
+        assertTrue("0-second rule with delete MUST drop notification & inbox surfacing", result is ExecuteAutomations.ExecutionResult.Dropped)
+        // Message MUST still be deleted from message repository!
+        Mockito.verify(mockMessageRepo).deleteMessages(listOf(9002L))
+        // Failed forward MUST be recorded in FailedAutomationMessage for inspectability and retry!
+        val captor = org.mockito.ArgumentCaptor.forClass(dev.octoshrimpy.quik.model.FailedAutomationMessage::class.java)
+        Mockito.verify(mockAutomationRepo).saveFailedMessage(capture(captor, dev.octoshrimpy.quik.model.FailedAutomationMessage()))
+        assertEquals(9002L, captor.value.messageId)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, captor.value.failedActionType)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 9. Multi-Rule Scoping: Immediate rule without delete does not trigger delete on delayed rule forward skip
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testMultiRule_immediateNonDeleteDoesNotTriggerDeleteOnDelayedForwardSkip() {
+        val mockContext = Mockito.mock(Context::class.java)
+        val mockAutomationRepo = Mockito.mock(dev.octoshrimpy.quik.repository.AutomationRuleRepository::class.java)
+        val mockContactsRepo = Mockito.mock(dev.octoshrimpy.quik.repository.ContactRepository::class.java)
+        val mockMessageRepo = Mockito.mock(dev.octoshrimpy.quik.repository.MessageRepository::class.java)
+        val mockConversationRepo = Mockito.mock(dev.octoshrimpy.quik.repository.ConversationRepository::class.java)
+
+        val interactor = ExecuteAutomations(
+            mockContext,
+            mockAutomationRepo,
+            mockContactsRepo,
+            mockMessageRepo,
+            mockConversationRepo,
+            null
+        )
+
+        // Rule 1: Immediate rule (delayMs = 0L) with MARK_READ only (NO delete)
+        val rule1 = AutomationRule(
+            id = 803L,
+            name = "Immediate Mark Read Rule",
+            enabled = true,
+            matchSender = "",
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                dev.octoshrimpy.quik.model.AutomationActionStep(
+                    action = AutomationRule.ACTION_MARK_READ
+                )
+            ))
+        }
+
+        // Rule 2: Delayed rule (delayMs = 30_000L) with FORWARD_SMS and ACTION_DELETE
+        val rule2 = AutomationRule(
+            id = 804L,
+            name = "Delayed Forward & Delete Rule",
+            enabled = true,
+            matchSender = "",
+            delayMs = 30_000L
+        ).apply {
+            setActionSteps(listOf(
+                dev.octoshrimpy.quik.model.AutomationActionStep(
+                    action = AutomationRule.ACTION_FORWARD_SMS,
+                    forwardToPhone = "+15559998888"
+                ),
+                dev.octoshrimpy.quik.model.AutomationActionStep(
+                    action = AutomationRule.ACTION_DELETE
+                )
+            ))
+        }
+
+        Mockito.`when`(mockAutomationRepo.getEnabledRules()).thenReturn(listOf(rule1, rule2))
+        Mockito.`when`(mockContactsRepo.isContact(Mockito.anyString())).thenReturn(false)
+
+        val incomingCarrierMsg = Message().apply {
+            id = 9003L
+            threadId = 403L
+            address = "121"
+            body = "Your carrier balance is low"
+        }
+
+        val result = interactor.execute(incomingCarrierMsg)
+
+        // Because Rule 2 (the rule with delete) has delay 30s, delete MUST be stripped and message preserved!
+        assertTrue("Result must be Normal when delete belongs to a delayed rule", result is ExecuteAutomations.ExecutionResult.Normal)
+        assertFalse("Message must NOT be dropped when delete belongs to a delayed rule", result is ExecuteAutomations.ExecutionResult.Dropped)
+        Mockito.verify(mockMessageRepo, Mockito.never()).deleteMessages(listOf(9003L))
+    }
+
+    private fun <T : Any> capture(captor: org.mockito.ArgumentCaptor<T>, dummy: T): T {
+        captor.capture()
+        return dummy
     }
 }

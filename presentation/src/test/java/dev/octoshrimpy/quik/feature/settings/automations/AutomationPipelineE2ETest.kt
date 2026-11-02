@@ -165,6 +165,11 @@ class AutomationPipelineE2ETest {
         val deletedMessageIds = mutableListOf<Long>()
         val markedReadThreadIds = mutableListOf<Long>()
         val markedSuppressedIds = mutableListOf<Long>()
+        val unsuppressedMessageIds = mutableListOf<Long>()
+
+        override fun unsuppressMessage(messageId: Long) {
+            unsuppressedMessageIds.add(messageId)
+        }
 
         override val deduplicationProgress: Observable<MessageRepository.DeduplicationProgress>
             get() = Observable.empty()
@@ -3259,6 +3264,520 @@ class AutomationPipelineE2ETest {
 
         // Calling onLowMemory must handle gracefully without crashing
         app.onLowMemory()
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 48. Zero-Second Rules With Delete ALWAYS Delete on Forward Skips
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testZeroSecondRuleWithDeleteAlwaysDeletesOnCarrierShortcodeForwardSkip() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+        val contactRepo = FakeContactRepo()
+
+        val rule = AutomationRule(
+            id = 901L,
+            name = "Zero-Second Forward & Delete",
+            enabled = true,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559998888"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+        autoRepo.saveRule(rule)
+
+        val interactor = ExecuteAutomations(
+            dummyContext(),
+            autoRepo,
+            contactRepo,
+            messageRepo,
+            convRepo,
+            null
+        )
+
+        // Incoming message from carrier operator "121"
+        val msg = Message().apply {
+            id = 7711L
+            threadId = 3311L
+            address = "121"
+            body = "Your account balance is 0"
+        }
+
+        val result = interactor.execute(msg)
+
+        // 1. Result MUST be Dropped upfront so no notification or sound is emitted
+        assertTrue("0-second rule with ACTION_DELETE must return Dropped result",
+            result is ExecuteAutomations.ExecutionResult.Dropped)
+
+        // 2. Message MUST be deleted from message repository
+        assertTrue("0-second rule with ACTION_DELETE must delete message on carrier skip",
+            messageRepo.deletedMessageIds.contains(7711L))
+
+        // 3. Failed message must be recorded in FailedAutomationMessage for inspectability & retry
+        val failedList = autoRepo.getFailedMessagesList()
+        assertEquals(1, failedList.size)
+        val failed = failedList.first()
+        assertEquals(7711L, failed.messageId)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, failed.failedActionType)
+        assertTrue(failed.errorMessage.contains("Carrier shortcode/alphanumeric sender rejected"))
+    }
+
+    @Test
+    fun testZeroSecondRuleWithDeleteAlwaysDeletesOnSelfForwardLoopSkip() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+        val contactRepo = FakeContactRepo()
+        val targetPhone = "+15558887777"
+
+        val rule = AutomationRule(
+            id = 902L,
+            name = "Zero-Second Loop Test",
+            enabled = true,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = targetPhone),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+        autoRepo.saveRule(rule)
+
+        val interactor = ExecuteAutomations(
+            dummyContext(),
+            autoRepo,
+            contactRepo,
+            messageRepo,
+            convRepo,
+            null
+        )
+
+        // Incoming message from the target destination itself (self-forward loop)
+        val msg = Message().apply {
+            id = 7722L
+            threadId = 3322L
+            address = targetPhone
+            body = "Echo loop message"
+        }
+
+        val result = interactor.execute(msg)
+
+        assertTrue("0-second rule with loop must return Dropped result",
+            result is ExecuteAutomations.ExecutionResult.Dropped)
+        assertTrue("0-second rule with delete must delete message on loop detection",
+            messageRepo.deletedMessageIds.contains(7722L))
+
+        val failedList = autoRepo.getFailedMessagesList()
+        assertEquals(1, failedList.size)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, failedList.first().failedActionType)
+        assertTrue(failedList.first().errorMessage.contains("Self-forward loop detected"))
+    }
+
+    @Test
+    fun testAutomationActionWorker_zeroSecondRuleWithDeleteAlwaysDeletesOnCooldownSkip() {
+        val autoRepo = FakeAutomationRuleRepo().apply {
+            forwardSlotAcquired = false // Simulate duplicate-content forward cooldown active
+        }
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val rule = AutomationRule(
+            id = 903L,
+            name = "Immediate Cooldown Skip Rule",
+            enabled = true,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559998888"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+
+        val workId = UUID.randomUUID().toString()
+        val actionsJson = AutomationActionStepSerializer.toJson(rule.getActionSteps())
+        val inputData = androidx.work.Data.Builder()
+            .putLong(ExecuteAutomations.KEY_RULE_ID, rule.id)
+            .putString(ExecuteAutomations.KEY_RULE_NAME, rule.name)
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 8833L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 4433L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "+11223344")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Confidential OTP 554433")
+            .putLong(AutomationActionWorker.KEY_DELAY_MS, 0L)
+            .putBoolean(AutomationActionWorker.KEY_DELETE_ON_FAILURE, true)
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = convRepo
+        worker.notificationManager = mockNotificationManager
+        worker.automationRepo = autoRepo
+
+        worker.doWork()
+
+        // 1. Message MUST be deleted from message repository!
+        assertTrue("0-second rule with delete MUST delete message on cooldown skip",
+            messageRepo.deletedMessageIds.contains(8833L))
+
+        // 2. Message MUST NOT be restored/unsuppressed to inbox!
+        assertFalse("0-second rule with delete must NEVER unsuppress message to inbox",
+            messageRepo.unsuppressedMessageIds.contains(8833L))
+
+        // 3. Failed message recorded for inspectability
+        val failedList = autoRepo.getFailedMessagesList()
+        assertEquals(1, failedList.size)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, failedList.first().failedActionType)
+        assertTrue(failedList.first().errorMessage.contains("Duplicate forward"))
+    }
+
+    @Test
+    fun testAutomationActionWorker_delayedRuleAbortsDeleteOnCooldownSkip() {
+        val autoRepo = FakeAutomationRuleRepo().apply {
+            forwardSlotAcquired = false // Cooldown active
+        }
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val rule = AutomationRule(
+            id = 904L,
+            name = "Delayed Cooldown Skip Rule",
+            enabled = true,
+            delayMs = 30_000L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559998888"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+
+        val workId = UUID.randomUUID().toString()
+        val actionsJson = AutomationActionStepSerializer.toJson(rule.getActionSteps())
+        val inputData = androidx.work.Data.Builder()
+            .putLong(ExecuteAutomations.KEY_RULE_ID, rule.id)
+            .putString(ExecuteAutomations.KEY_RULE_NAME, rule.name)
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 8844L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 4444L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "+11223344")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Delayed message body")
+            .putLong(AutomationActionWorker.KEY_DELAY_MS, 30_000L)
+            .putBoolean(AutomationActionWorker.KEY_DELETE_ON_FAILURE, false)
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = convRepo
+        worker.notificationManager = mockNotificationManager
+        worker.automationRepo = autoRepo
+
+        worker.doWork()
+
+        // 1. Message MUST NOT be deleted because it is a delayed rule!
+        assertFalse("Delayed rule (>0s) must abort delete on cooldown skip",
+            messageRepo.deletedMessageIds.contains(8844L))
+
+        // 2. Message MUST be unsuppressed and restored to inbox
+        assertTrue("Delayed rule (>0s) must unsuppress message back to inbox on forward skip",
+            messageRepo.unsuppressedMessageIds.contains(8844L))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 52. Zero-Second Rule with Delete MUST Always Delete on Forward Send Failure (No Retry Deferral)
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testAutomationActionWorker_zeroSecondRuleWithDeleteAlwaysDeletesOnForwardSendFailure() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val messageRepo = FakeMessageRepo().apply {
+            failSend = true // Simulate carrier/network modem send failure
+        }
+        val convRepo = FakeConvRepo()
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val rule = AutomationRule(
+            id = 905L,
+            name = "Immediate Forward & Delete Send Failure Rule",
+            enabled = true,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559998888"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+
+        val workId = UUID.randomUUID().toString()
+        val actionsJson = AutomationActionStepSerializer.toJson(rule.getActionSteps())
+        val inputData = androidx.work.Data.Builder()
+            .putLong(ExecuteAutomations.KEY_RULE_ID, rule.id)
+            .putString(ExecuteAutomations.KEY_RULE_NAME, rule.name)
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 8855L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 4455L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "+11223344")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Confidential send failure body")
+            .putLong(AutomationActionWorker.KEY_DELAY_MS, 0L)
+            .putBoolean(AutomationActionWorker.KEY_DELETE_ON_FAILURE, true)
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = convRepo
+        worker.notificationManager = mockNotificationManager
+        worker.automationRepo = autoRepo
+
+        val result = worker.doWork()
+
+        // 1. Worker MUST fail immediately (NOT return Result.retry() which would defer deletion!)
+        assertTrue("0-second rule with delete MUST fail immediately on forward send failure",
+            result is androidx.work.ListenableWorker.Result.Failure)
+
+        // 2. Message MUST be deleted from message repository immediately!
+        assertTrue("0-second rule with delete MUST delete message from repository on forward send failure",
+            messageRepo.deletedMessageIds.contains(8855L))
+
+        // 3. Message MUST NOT be restored/unsuppressed to inbox!
+        assertFalse("0-second rule with delete must NEVER unsuppress message to inbox on send failure",
+            messageRepo.unsuppressedMessageIds.contains(8855L))
+
+        // 4. Failed message MUST be recorded in FailedAutomationMessage for inspectability & retry!
+        val failedList = autoRepo.getFailedMessagesList()
+        assertEquals(1, failedList.size)
+        val failed = failedList.first()
+        assertEquals(8855L, failed.messageId)
+        assertEquals(AutomationRule.ACTION_FORWARD_SMS, failed.failedActionType)
+        assertTrue(failed.canRetry)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 53. Delayed Rule Retries on Forward Send Failure Without Deleting Message
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testAutomationActionWorker_delayedRuleRetriesOnForwardSendFailureWithoutDeleting() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val messageRepo = FakeMessageRepo().apply {
+            failSend = true // Simulate carrier send failure
+        }
+        val convRepo = FakeConvRepo()
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val rule = AutomationRule(
+            id = 906L,
+            name = "Delayed Forward & Delete Send Failure Rule",
+            enabled = true,
+            delayMs = 30_000L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559998888"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+
+        val workId = UUID.randomUUID().toString()
+        val actionsJson = AutomationActionStepSerializer.toJson(rule.getActionSteps())
+        val inputData = androidx.work.Data.Builder()
+            .putLong(ExecuteAutomations.KEY_RULE_ID, rule.id)
+            .putString(ExecuteAutomations.KEY_RULE_NAME, rule.name)
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 8866L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 4466L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "+11223344")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Delayed retry body")
+            .putLong(AutomationActionWorker.KEY_DELAY_MS, 30_000L)
+            .putBoolean(AutomationActionWorker.KEY_DELETE_ON_FAILURE, false)
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = convRepo
+        worker.notificationManager = mockNotificationManager
+        worker.automationRepo = autoRepo
+
+        val result = worker.doWork()
+
+        // Delayed rule should return Result.retry() on attempt 0
+        assertTrue("Delayed rule should retry on send failure for runAttemptCount < 3",
+            result is androidx.work.ListenableWorker.Result.Retry)
+        assertFalse("Delayed rule must NOT delete message on retryable send failure",
+            messageRepo.deletedMessageIds.contains(8866L))
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 54. Zero-Second Rule with Delete ALWAYS Deletes on Auto-Reply Send Failure
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testAutomationActionWorker_zeroSecondRuleWithDeleteAlwaysDeletesOnAutoReplySendFailure() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val messageRepo = FakeMessageRepo().apply {
+            failSend = true // Fail send
+        }
+        val convRepo = FakeConvRepo()
+        val mockNotificationManager = Mockito.mock(dev.octoshrimpy.quik.manager.NotificationManager::class.java)
+
+        val rule = AutomationRule(
+            id = 907L,
+            name = "Immediate Auto-Reply & Delete Failure Rule",
+            enabled = true,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_AUTO_REPLY, replyTemplate = "Auto reply text"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+
+        val workId = UUID.randomUUID().toString()
+        val actionsJson = AutomationActionStepSerializer.toJson(rule.getActionSteps())
+        val inputData = androidx.work.Data.Builder()
+            .putLong(ExecuteAutomations.KEY_RULE_ID, rule.id)
+            .putString(ExecuteAutomations.KEY_RULE_NAME, rule.name)
+            .putString(AutomationActionWorker.KEY_ACTIONS_JSON, actionsJson)
+            .putLong(AutomationActionWorker.KEY_MESSAGE_ID, 8877L)
+            .putLong(AutomationActionWorker.KEY_THREAD_ID, 4477L)
+            .putString(AutomationActionWorker.KEY_SENDER_ADDRESS, "+11223344")
+            .putString(AutomationActionWorker.KEY_MESSAGE_BODY, "Inbound trigger body")
+            .putLong(AutomationActionWorker.KEY_DELAY_MS, 0L)
+            .putBoolean(AutomationActionWorker.KEY_DELETE_ON_FAILURE, true)
+            .build()
+
+        val workerParams = org.objenesis.ObjenesisStd().newInstance(androidx.work.WorkerParameters::class.java)
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mId").apply {
+            isAccessible = true
+            set(workerParams, UUID.fromString(workId))
+        }
+        androidx.work.WorkerParameters::class.java.getDeclaredField("mInputData").apply {
+            isAccessible = true
+            set(workerParams, inputData)
+        }
+
+        AutomationActionWorker.clearLedger()
+        val worker = AutomationActionWorker(dummyContext(), workerParams)
+        worker.messageRepo = messageRepo
+        worker.conversationRepo = convRepo
+        worker.notificationManager = mockNotificationManager
+        worker.automationRepo = autoRepo
+
+        val result = worker.doWork()
+
+        assertTrue("0-second rule with delete MUST fail immediately on auto-reply send failure",
+            result is androidx.work.ListenableWorker.Result.Failure)
+        assertTrue("0-second rule with delete MUST delete message on auto-reply send failure",
+            messageRepo.deletedMessageIds.contains(8877L))
+        assertFalse("0-second rule with delete must NEVER unsuppress message on auto-reply failure",
+            messageRepo.unsuppressedMessageIds.contains(8877L))
+        assertEquals(1, autoRepo.getFailedMessagesList().size)
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 55. Multi-Rule Scoping: Immediate Read Rule does not trigger Delete on Delayed Forward Skip
+    // ────────────────────────────────────────────────────────────────────
+    @Test
+    fun testExecuteAutomations_multiRuleScoping_immediateReadAndDelayedForwardDelete() {
+        val autoRepo = FakeAutomationRuleRepo()
+        val messageRepo = FakeMessageRepo()
+        val convRepo = FakeConvRepo()
+        val contactRepo = FakeContactRepo()
+
+        // Rule 1: Immediate read rule (delayMs = 0L)
+        val rule1 = AutomationRule(
+            id = 908L,
+            name = "Immediate Read Rule",
+            enabled = true,
+            delayMs = 0L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_MARK_READ)
+            ))
+        }
+
+        // Rule 2: Delayed forward and delete rule (delayMs = 30_000L)
+        val rule2 = AutomationRule(
+            id = 909L,
+            name = "Delayed Forward & Delete Rule",
+            enabled = true,
+            delayMs = 30_000L
+        ).apply {
+            setActionSteps(listOf(
+                AutomationActionStep(action = AutomationRule.ACTION_FORWARD_SMS, forwardToPhone = "+15559998888"),
+                AutomationActionStep(action = AutomationRule.ACTION_DELETE)
+            ))
+        }
+
+        autoRepo.saveRule(rule1)
+        autoRepo.saveRule(rule2)
+
+        val interactor = ExecuteAutomations(
+            dummyContext(),
+            autoRepo,
+            contactRepo,
+            messageRepo,
+            convRepo,
+            null
+        )
+
+        val msg = Message().apply {
+            id = 7755L
+            threadId = 3355L
+            address = "121"
+            body = "Carrier alert text"
+        }
+
+        val result = interactor.execute(msg)
+
+        // Result MUST be Normal (not dropped), delete is stripped, message NOT deleted!
+        assertTrue("Multi-rule: delayed delete must not be executed when forward rejected",
+            result is ExecuteAutomations.ExecutionResult.Normal)
+        assertFalse("Message must NOT be deleted for delayed rule with forward skip",
+            messageRepo.deletedMessageIds.contains(7755L))
+        assertEquals(1, autoRepo.getFailedMessagesList().size)
     }
 }
 
