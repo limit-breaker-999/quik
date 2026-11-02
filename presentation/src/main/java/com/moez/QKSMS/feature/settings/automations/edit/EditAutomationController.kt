@@ -59,6 +59,8 @@ class EditAutomationController(private val ruleId: Long = -1L)
     private val moveDownSubject: Subject<Int> = PublishSubject.create()
     private val stepUpdatedSubject: Subject<Pair<Int, AutomationActionStep>> = PublishSubject.create()
     private val stepDebounceSubject: Subject<Pair<Int, AutomationActionStep>> = PublishSubject.create()
+    private val forwardRateLimitSubject: Subject<Int> = PublishSubject.create()
+    private val replyRateLimitSubject: Subject<Int> = PublishSubject.create()
     private var stepDebounceDisposable: Disposable? = null
 
     init {
@@ -496,6 +498,12 @@ class EditAutomationController(private val ruleId: Long = -1L)
         binding.skipContactsSwitch.checkedChanges().skipInitialValue().filter { !isRendering }
 
     private fun flushStepDebounce() {
+        val forwardMin = binding.forwardRateLimitField.text?.toString()?.toIntOrNull() ?: 0
+        forwardRateLimitSubject.onNext(forwardMin)
+
+        val replyMin = binding.replyRateLimitField.text?.toString()?.toIntOrNull() ?: 0
+        replyRateLimitSubject.onNext(replyMin)
+
         val container = binding.actionStepsContainer
         for (i in 0 until container.childCount) {
             val child = container.getChildAt(i)
@@ -522,13 +530,19 @@ class EditAutomationController(private val ruleId: Long = -1L)
 
     override fun delaySelected(): Observable<Long> = delaySubject
     override fun forwardRateLimitChanges(): Observable<Int> =
-        binding.forwardRateLimitField.textChanges().skipInitialValue().filter { !isRendering }
-            .debounce(300, TimeUnit.MILLISECONDS)
-            .map { it.toString().toIntOrNull() ?: 0 }
+        Observable.merge(
+            binding.forwardRateLimitField.textChanges().skipInitialValue().filter { !isRendering }
+                .debounce(300, TimeUnit.MILLISECONDS)
+                .map { it.toString().toIntOrNull() ?: 0 },
+            forwardRateLimitSubject
+        )
     override fun replyRateLimitChanges(): Observable<Int> =
-        binding.replyRateLimitField.textChanges().skipInitialValue().filter { !isRendering }
-            .debounce(300, TimeUnit.MILLISECONDS)
-            .map { it.toString().toIntOrNull() ?: 0 }
+        Observable.merge(
+            binding.replyRateLimitField.textChanges().skipInitialValue().filter { !isRendering }
+                .debounce(300, TimeUnit.MILLISECONDS)
+                .map { it.toString().toIntOrNull() ?: 0 },
+            replyRateLimitSubject
+        )
     override fun saveClicks(): Observable<*> = binding.saveButton.clicks().doOnNext { flushStepDebounce() }
     override fun presetClicks(): Observable<*> = binding.presetsButton.clicks()
 

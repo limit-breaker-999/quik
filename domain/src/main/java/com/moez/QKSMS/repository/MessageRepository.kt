@@ -110,4 +110,6 @@ interface MessageRepository {
     fun resetOrphanedSuppressedMessages(): List<Long> = emptyList()
 
     fun markPendingSuppression(messageId: Long, expiresAt: Long) = Unit
+
+    fun unsuppressMessage(messageId: Long) = Unit
 }
