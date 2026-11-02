@@ -211,6 +211,7 @@ dependencies {
     testImplementation "androidx.test:runner:$androidx_testrunner_version"
     testImplementation "junit:junit:$junit_version"
     testImplementation "org.mockito:mockito-core:$mockito_version"
+    testImplementation "org.json:json:20231013"
 
     // moshi
     implementation "com.squareup.moshi:moshi:$moshi_version"

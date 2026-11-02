@@ -241,6 +241,8 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 )
                             }
 
+                            val contentKey = dev.octoshrimpy.quik.util.sha256(messageBody).take(16)
+
                             // Anti-cascade check: carrier shortcode / alphanumeric / USSD filter
                             val matchingRule = if (::automationRepo.isInitialized && ruleId > 0) automationRepo.getRule(ruleId) else null
                             val isWhitelisted = dev.octoshrimpy.quik.interactor.ExecuteAutomations.isSenderWhitelisted(
@@ -249,44 +251,100 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                             )
                             if (dev.octoshrimpy.quik.interactor.ExecuteAutomations.isCarrierOrShortcode(senderAddress) &&
                                 !isWhitelisted) {
-                                return handleStepFailure(
-                                    workId, index, step.action,
-                                    "Carrier shortcode/alphanumeric sender rejected for automated forwarding: $senderAddress",
-                                    ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
-                                )
+                                if (::automationRepo.isInitialized) {
+                                    automationRepo.log(
+                                        ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
+                                        step.action,
+                                        "Carrier shortcode/alphanumeric sender rejected for automated forwarding: $senderAddress, skipping forward step",
+                                        dev.octoshrimpy.quik.model.AutomationDiag.json(
+                                            "stage" to "forward_guard",
+                                            "outcome" to "skip",
+                                            "stepIndex" to index,
+                                            "reason" to "carrier_shortcode_sender",
+                                            "sender" to senderAddress
+                                        )
+                                    )
+                                }
+                                continue
                             }
 
                             // Anti-cascade check: self-forward loop detection
                             val ownNumber = dev.octoshrimpy.quik.interactor.ExecuteAutomations.getOwnNumber(applicationContext)
                             if (dev.octoshrimpy.quik.interactor.ExecuteAutomations.isSelfForwardLoop(messageBody, phone, ownNumber)) {
-                                return handleStepFailure(
-                                    workId, index, step.action,
-                                    "Self-forward loop detected: message body contains target destination or own number",
-                                    ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
-                                )
+                                if (::automationRepo.isInitialized) {
+                                    automationRepo.log(
+                                        ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
+                                        step.action,
+                                        "Self-forward loop detected: message body contains target destination or own number, skipping forward step",
+                                        dev.octoshrimpy.quik.model.AutomationDiag.json(
+                                            "stage" to "forward_guard",
+                                            "outcome" to "skip",
+                                            "stepIndex" to index,
+                                            "reason" to "self_forward_loop",
+                                            "destination" to phone
+                                        )
+                                    )
+                                }
+                                continue
                             }
 
-                            // Anti-cascade check: forward cooldown per destination
+                            // Anti-cascade check: duplicate-content forward cooldown per destination
                             val forwardLimitMs = inputData.getLong(KEY_FORWARD_RATE_LIMIT_MS, 60000L)
-                            if (::automationRepo.isInitialized && !automationRepo.tryAcquireForwardSlot(phone, forwardLimitMs)) {
-                                return handleStepFailure(
-                                    workId, index, step.action,
-                                    "Forward rate limit exceeded for destination $phone (cooldown: ${forwardLimitMs}ms)",
-                                    ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
-                                )
+                            if (::automationRepo.isInitialized && !automationRepo.tryAcquireForwardSlot(phone, contentKey, forwardLimitMs)) {
+                                if (::automationRepo.isInitialized) {
+                                    automationRepo.log(
+                                        ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
+                                        step.action,
+                                        "Duplicate forward (same content to $phone within ${forwardLimitMs}ms cooldown), skipping forward step",
+                                        dev.octoshrimpy.quik.model.AutomationDiag.json(
+                                            "stage" to "forward_guard",
+                                            "outcome" to "skip",
+                                            "stepIndex" to index,
+                                            "reason" to "duplicate_content_cooldown",
+                                            "destination" to phone,
+                                            "contentKey" to contentKey,
+                                            "cooldownMs" to forwardLimitMs
+                                        )
+                                    )
+                                }
+                                continue
                             }
 
                             // Anti-cascade check: outbound budget manager (cap automated SMS at 20 per 30 minutes)
                             if (::automationRepo.isInitialized && !automationRepo.checkOutboundBudget(20, 30 * 60 * 1000L)) {
-                                return handleStepFailure(
-                                    workId, index, step.action,
-                                    "Outbound SMS budget exceeded (max 20 per 30 minutes)",
-                                    ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
-                                    hasDelete, actionsJson ?: ""
-                                )
+                                automationRepo.releaseForwardSlot(phone, contentKey)
+                                if (::automationRepo.isInitialized) {
+                                    automationRepo.log(
+                                        ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
+                                        step.action,
+                                        "Outbound SMS budget exceeded (max 20 per 30 minutes), skipping forward step",
+                                        dev.octoshrimpy.quik.model.AutomationDiag.json(
+                                            "stage" to "forward_guard",
+                                            "outcome" to "skip",
+                                            "stepIndex" to index,
+                                            "reason" to "outbound_budget_exceeded",
+                                            "budgetMax" to 20,
+                                            "budgetWindowMs" to 30 * 60 * 1000L
+                                        )
+                                    )
+                                    val failed = FailedAutomationMessage(
+                                        messageId = messageId,
+                                        threadId = threadId,
+                                        subId = subId,
+                                        sender = senderAddress,
+                                        body = messageBody,
+                                        ruleId = ruleId,
+                                        ruleName = ruleName,
+                                        failedStepIndex = index,
+                                        failedActionType = step.action,
+                                        errorMessage = "Outbound SMS budget exceeded (max 20 per 30 minutes)",
+                                        timestamp = System.currentTimeMillis(),
+                                        canRetry = true,
+                                        actionsJson = actionsJson ?: ""
+                                    )
+                                    automationRepo.saveFailedMessage(failed)
+                                }
+                                continue
                             }
 
                             // Serial Radio Pacing: enforce 2,000ms inter-message interval
@@ -294,10 +352,40 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
 
                             val appendSender = step.appendSenderToForward
                             val body = if (appendSender) "From: $senderAddress | $messageBody" else messageBody
-                            val sent = messageRepo.sendNewMessages(subId, listOf(phone), body, emptyList(), false)
+                            var sendError: String? = null
+                            val sent = try {
+                                messageRepo.sendNewMessages(subId, listOf(phone), body, emptyList(), false)
+                            } catch (e: Exception) {
+                                Timber.w(e, "Forward send threw exception")
+                                sendError = "${e.javaClass.simpleName}: ${e.message}"
+                                emptyList()
+                            }
                             if (sent.isEmpty()) {
+                                // Refund the cooldown slot: a failed send must not block retries
+                                if (::automationRepo.isInitialized) {
+                                    automationRepo.releaseForwardSlot(phone, contentKey)
+                                }
+                                if (runAttemptCount < 3) {
+                                    if (::automationRepo.isInitialized) {
+                                        automationRepo.log(
+                                            ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
+                                            step.action,
+                                            "Forward send attempt ${runAttemptCount + 1} failed, retrying",
+                                            dev.octoshrimpy.quik.model.AutomationDiag.json(
+                                                "stage" to "forward_send",
+                                                "outcome" to "retry",
+                                                "stepIndex" to index,
+                                                "attempt" to runAttemptCount + 1,
+                                                "destination" to phone,
+                                                "error" to sendError
+                                            )
+                                        )
+                                    }
+                                    return Result.retry()
+                                }
                                 return handleStepFailure(
-                                    workId, index, step.action, "Carrier/provider rejected SMS send",
+                                    workId, index, step.action,
+                                    sendError ?: "Carrier/provider rejected SMS send after ${runAttemptCount + 1} attempts",
                                     ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
                                     hasDelete, actionsJson ?: ""
                                 )
@@ -306,7 +394,14 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                                 automationRepo.recordOutboundSms(phone)
                                 automationRepo.log(
                                     ruleId, ruleName, messageId, AutomationLog.TYPE_SUCCESS,
-                                    step.action, "Forwarded SMS to $phone"
+                                    step.action, "Forwarded SMS to $phone",
+                                    dev.octoshrimpy.quik.model.AutomationDiag.json(
+                                        "stage" to "forward_send",
+                                        "outcome" to "ok",
+                                        "stepIndex" to index,
+                                        "destination" to phone,
+                                        "outboundMessageIds" to sent.map { it.id }
+                                    )
                                 )
                             }
                             markStepCompleted(workId, index, applicationContext)
@@ -374,10 +469,40 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                             RadioPacingManager.pace()
 
                             val body = template.replace("{sender}", senderAddress)
-                            val sent = messageRepo.sendNewMessages(subId, listOf(senderAddress), body, emptyList(), false)
+                            var sendError: String? = null
+                            val sent = try {
+                                messageRepo.sendNewMessages(subId, listOf(senderAddress), body, emptyList(), false)
+                            } catch (e: Exception) {
+                                Timber.w(e, "Auto-reply send threw exception")
+                                sendError = "${e.javaClass.simpleName}: ${e.message}"
+                                emptyList()
+                            }
                             if (sent.isEmpty()) {
+                                // Refund the reply slot: a failed send must not block retries
+                                if (::automationRepo.isInitialized) {
+                                    automationRepo.releaseReplySlot(ruleId, threadId)
+                                }
+                                if (runAttemptCount < 3) {
+                                    if (::automationRepo.isInitialized) {
+                                        automationRepo.log(
+                                            ruleId, ruleName, messageId, AutomationLog.TYPE_INFO,
+                                            step.action,
+                                            "Auto-reply send attempt ${runAttemptCount + 1} failed, retrying",
+                                            dev.octoshrimpy.quik.model.AutomationDiag.json(
+                                                "stage" to "reply_send",
+                                                "outcome" to "retry",
+                                                "stepIndex" to index,
+                                                "attempt" to runAttemptCount + 1,
+                                                "destination" to senderAddress,
+                                                "error" to sendError
+                                            )
+                                        )
+                                    }
+                                    return Result.retry()
+                                }
                                 return handleStepFailure(
-                                    workId, index, step.action, "Carrier/provider rejected auto-reply send",
+                                    workId, index, step.action,
+                                    sendError ?: "Carrier/provider rejected auto-reply send after ${runAttemptCount + 1} attempts",
                                     ruleId, ruleName, messageId, threadId, subId, senderAddress, messageBody,
                                     hasDelete, actionsJson ?: ""
                                 )
@@ -487,7 +612,18 @@ class AutomationActionWorker(appContext: Context, workerParams: WorkerParameters
                     messageId = messageId,
                     type = AutomationLog.TYPE_ERROR,
                     actionType = actionType,
-                    details = "Step $stepIndex ($actionType) failed: $errorMessage"
+                    details = "Step $stepIndex ($actionType) failed: $errorMessage",
+                    payloadJson = dev.octoshrimpy.quik.model.AutomationDiag.json(
+                        "stage" to "chain",
+                        "outcome" to "error",
+                        "stepIndex" to stepIndex,
+                        "actionType" to actionType,
+                        "error" to errorMessage,
+                        "hasDelete" to hasDelete,
+                        "sender" to senderAddress,
+                        "body" to messageBody.take(1000),
+                        "actionsJson" to actionsJson
+                    )
                 )
                 val failed = FailedAutomationMessage(
                     messageId = messageId,

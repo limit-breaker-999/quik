@@ -45,6 +45,8 @@ class EditAutomationPresenter @Inject constructor(
                 skipContacts = rule.skipContacts,
                 actionSteps = if (steps.isNotEmpty()) steps else listOf(AutomationActionStep(action = AutomationRule.ACTION_DELETE)),
                 delayMs = rule.delayMs,
+                forwardRateLimitMin = (rule.forwardRateLimitMs / 60_000L).toInt(),
+                replyRateLimitMin = (rule.replyRateLimitMs / 60_000L).toInt(),
                 enabled = rule.enabled
             )
         }
@@ -104,6 +106,16 @@ class EditAutomationPresenter @Inject constructor(
             .distinctUntilChanged()
             .autoDisposable(view.scope())
             .subscribe { ms -> newState { copy(delayMs = ms) } }
+
+        view.forwardRateLimitChanges()
+            .distinctUntilChanged()
+            .autoDisposable(view.scope())
+            .subscribe { min -> newState { copy(forwardRateLimitMin = min) } }
+
+        view.replyRateLimitChanges()
+            .distinctUntilChanged()
+            .autoDisposable(view.scope())
+            .subscribe { min -> newState { copy(replyRateLimitMin = min) } }
 
         // Modular action step operations
         view.addStepClicks()
@@ -201,7 +213,9 @@ class EditAutomationPresenter @Inject constructor(
                     matchBodyIsRegex = s.matchBodyIsRegex,
                     matchBodyCaseSensitive = s.matchBodyCaseSensitive,
                     skipContacts = s.skipContacts,
-                    delayMs = s.delayMs
+                    delayMs = s.delayMs,
+                    forwardRateLimitMs = s.forwardRateLimitMin * 60_000L,
+                    replyRateLimitMs = s.replyRateLimitMin * 60_000L
                 )
                 rule.setActionSteps(s.actionSteps)
                 Timber.d("Saving automation rule: ${rule.name}")

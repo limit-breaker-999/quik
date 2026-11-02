@@ -127,8 +127,11 @@ class AutomationsPresenter(
                             .putBoolean(ExecuteAutomations.KEY_APPEND_SENDER, firstStep.appendSenderToForward)
                             .putString(ExecuteAutomations.KEY_REPLY_TEMPLATE, firstStep.replyTemplate)
                             .putString(ExecuteAutomations.KEY_SENDER_ADDRESS, failed.sender)
-                            .putInt(ExecuteAutomations.KEY_SUB_ID, failed.subId)
                             .putString(ExecuteAutomations.KEY_MESSAGE_BODY, failed.body)
+                            .putLong(
+                                ExecuteAutomations.KEY_FORWARD_RATE_LIMIT_MS,
+                                automationRepo.getRule(failed.ruleId)?.forwardRateLimitMs ?: 60000L
+                            )
                             .build()
 
                         val workerClass = Class.forName("dev.octoshrimpy.quik.worker.AutomationActionWorker")
@@ -136,7 +139,9 @@ class AutomationsPresenter(
 
                         val request = OneTimeWorkRequest.Builder(workerClass)
                             .setInputData(data)
+                            .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
                             .build()
+
 
                         if (workManagerEnqueuer != null) {
                             workManagerEnqueuer.invoke(request)
@@ -203,6 +208,109 @@ class AutomationsPresenter(
                 { automationRepo.clearLogs() },
                 { e -> Timber.e(e, "Failed to clear logs") }
             )
+
+        view.exportLogsClicks()
+            .observeOn(Schedulers.io())
+            .subscribeOn(Schedulers.io())
+            .map { buildDiagnosticsJson() }
+            .observeOn(AndroidSchedulers.mainThread())
+            .autoDisposable(view.scope())
+            .subscribe(
+                { json -> view.showExport(json) },
+                { e -> Timber.e(e, "Failed to export logs") }
+            )
+    }
+
+    /**
+     * Builds the full-depth diagnostics export: device/app metadata, all rule
+     * configurations, failed-message records, and every automation log event
+     * with its structured JSON payload. Machine-ingestible by external agents.
+     */
+    fun buildDiagnosticsJson(): String {
+        val root = org.json.JSONObject()
+        root.put("exportedAt", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+            .format(java.util.Date(System.currentTimeMillis())))
+        try {
+            val pm = context.packageManager
+            val pkg = pm.getPackageInfo(context.packageName, 0)
+            root.put("appVersion", pkg.versionName ?: "unknown")
+        } catch (e: Exception) {
+            root.put("appVersion", "unknown")
+        }
+        val device = org.json.JSONObject()
+        device.put("model", android.os.Build.MODEL)
+        device.put("manufacturer", android.os.Build.MANUFACTURER)
+        device.put("android", android.os.Build.VERSION.RELEASE)
+        device.put("sdkInt", android.os.Build.VERSION.SDK_INT)
+        root.put("device", device)
+        root.put("schema", 1)
+
+        val rules = org.json.JSONArray()
+        for (rule in automationRepo.getRulesList()) {
+            val r = org.json.JSONObject()
+            r.put("id", rule.id)
+            r.put("name", rule.name)
+            r.put("enabled", rule.enabled)
+            r.put("matchSender", rule.matchSender)
+            r.put("matchSenderIsRegex", rule.matchSenderIsRegex)
+            r.put("matchSenderCaseSensitive", rule.matchSenderCaseSensitive)
+            r.put("matchBody", rule.matchBody)
+            r.put("matchBodyIsRegex", rule.matchBodyIsRegex)
+            r.put("matchBodyCaseSensitive", rule.matchBodyCaseSensitive)
+            r.put("skipContacts", rule.skipContacts)
+            r.put("actionsJson", rule.actionsJson)
+            r.put("delayMs", rule.delayMs)
+            r.put("priority", rule.priority)
+            r.put("stopOnMatch", rule.stopOnMatch)
+            r.put("replyRateLimitMs", rule.replyRateLimitMs)
+            r.put("forwardRateLimitMs", rule.forwardRateLimitMs)
+            r.put("hitCount", rule.hitCount)
+            r.put("createdAt", rule.createdAt)
+            rules.put(r)
+        }
+        root.put("rules", rules)
+
+        val failed = org.json.JSONArray()
+        for (f in automationRepo.getFailedMessagesList()) {
+            val fm = org.json.JSONObject()
+            fm.put("id", f.id)
+            fm.put("messageId", f.messageId)
+            fm.put("threadId", f.threadId)
+            fm.put("subId", f.subId)
+            fm.put("sender", f.sender)
+            fm.put("body", f.body)
+            fm.put("ruleId", f.ruleId)
+            fm.put("ruleName", f.ruleName)
+            fm.put("failedStepIndex", f.failedStepIndex)
+            fm.put("failedActionType", f.failedActionType)
+            fm.put("errorMessage", f.errorMessage)
+            fm.put("timestamp", f.timestamp)
+            fm.put("canRetry", f.canRetry)
+            fm.put("actionsJson", f.actionsJson)
+            failed.put(fm)
+        }
+        root.put("failedMessages", failed)
+
+        val events = org.json.JSONArray()
+        val logs = automationRepo.getLogsList(null).sortedBy { it.timestamp }
+        for (log in logs) {
+            val e = org.json.JSONObject()
+            e.put("id", log.id)
+            e.put("ts", log.timestamp)
+            e.put("iso", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+                .format(java.util.Date(log.timestamp)))
+            e.put("type", log.type)
+            e.put("actionType", log.actionType)
+            e.put("ruleId", log.ruleId)
+            e.put("ruleName", log.ruleName)
+            e.put("messageId", log.messageId)
+            e.put("details", log.details)
+            e.put("data", org.json.JSONObject(log.jsonPayload.ifBlank { "{}" }))
+            events.put(e)
+        }
+        root.put("events", events)
+
+        return root.toString(2)
     }
 
     override fun onCleared() {

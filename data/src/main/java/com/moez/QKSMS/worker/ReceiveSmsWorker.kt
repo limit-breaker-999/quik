@@ -54,6 +54,7 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
     @Inject lateinit var filterRepo: MessageContentFilterRepository
     @Inject lateinit var contactsRepo: ContactRepository
     @Inject lateinit var executeAutomations: ExecuteAutomations
+    @Inject lateinit var automationRepo: dev.octoshrimpy.quik.repository.AutomationRuleRepository
 
     override fun doWork(): Result {
         Timber.v("started")
@@ -66,7 +67,34 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
 
         val message = messageRepo.getUnmanagedMessage(messageId) ?: return Result.failure(inputData)
 
+        fun diagLog(type: String, actionType: String, details: String, vararg payload: Pair<String, Any?>) {
+            try {
+                automationRepo.log(
+                    0L, "pipeline", message.id, type, actionType, details,
+                    dev.octoshrimpy.quik.model.AutomationDiag.json(
+                        "stage" to "receive", *payload
+                    )
+                )
+            } catch (_: Exception) {
+            }
+        }
+
+        diagLog(
+            dev.octoshrimpy.quik.model.AutomationLog.TYPE_INFO, "INGEST",
+            "Processing received message",
+            "threadId" to message.threadId, "subId" to message.subId,
+            "sender" to message.address, "bodyLen" to message.getText().length
+        )
+
+
         val action = blockingClient.shouldBlock(message.address).blockingGet()
+
+        diagLog(
+            dev.octoshrimpy.quik.model.AutomationLog.TYPE_INFO, "BLOCK_CHECK",
+            "Blocking check result: ${action.javaClass.simpleName}",
+            "blockingResult" to action.javaClass.simpleName
+        )
+
 
         when {
             ((action is BlockingClient.Action.Block) && prefs.drop.get()) -> {
@@ -95,6 +123,11 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
         }
 
         val messageFilterAction = filterRepo.isBlocked(message.getText(), message.address, contactsRepo)
+        diagLog(
+            dev.octoshrimpy.quik.model.AutomationLog.TYPE_INFO, "FILTER_CHECK",
+            "Content filter result: blocked=$messageFilterAction",
+            "filterBlocked" to messageFilterAction
+        )
         if (messageFilterAction) {
             Timber.v("message dropped based on content filters")
             messageRepo.deleteMessages(listOf(message.id))
@@ -103,6 +136,12 @@ class ReceiveSmsWorker(appContext: Context, workerParams: WorkerParameters)
 
         // Run automations (may delete/forward/archive/reply based on user-configured rules)
         val automationResult = executeAutomations.execute(message)
+        diagLog(
+            dev.octoshrimpy.quik.model.AutomationLog.TYPE_INFO, "AUTOMATION",
+            "Automation result: ${automationResult.javaClass.simpleName} (archived=${automationResult.isArchived})",
+            "automationResult" to automationResult.javaClass.simpleName,
+            "archived" to automationResult.isArchived
+        )
         if (automationResult is ExecuteAutomations.ExecutionResult.Dropped) {
             Timber.v("message dropped by automation rule")
             return Result.success()

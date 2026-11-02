@@ -40,7 +40,7 @@ class QkRealmMigration @Inject constructor(
 ) : RealmMigration {
 
     companion object {
-        const val SCHEMA_VERSION: Long = 21
+        const val SCHEMA_VERSION: Long = 22
     }
 
     @SuppressLint("ApplySharedPref")
@@ -410,6 +410,23 @@ class QkRealmMigration @Inject constructor(
 
             version++
         }
+
+        if (version < newVersion && version == 21L) {
+            realm.schema.get("Message")
+                ?.addField("suppressionExpiresAt", Long::class.java, FieldAttribute.REQUIRED)
+                ?.transform { obj ->
+                    obj.setLong("suppressionExpiresAt", 0L)
+                }
+
+            realm.schema.get("AutomationLog")
+                ?.addField("jsonPayload", String::class.java, FieldAttribute.REQUIRED)
+                ?.transform { obj ->
+                    obj.setString("jsonPayload", "{}")
+                }
+
+            version++
+        }
+
 
         check(version >= newVersion.coerceAtMost(SCHEMA_VERSION)) {
             "Migration from v$oldVersion to v$newVersion failed at v$version"

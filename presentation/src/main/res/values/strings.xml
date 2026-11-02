@@ -380,6 +380,15 @@
     <string name="automation_delay_selected_5m">Selected: 5 minutes</string>
     <string name="automation_delay_selected_1h">Selected: 1 hour</string>
     <string name="automation_delay_selected_custom">Selected: %1$d s</string>
+    <string name="automation_forward_rate_limit_hint">Forward cooldown (minutes, 0 = off) — blocks only identical content to the same destination</string>
+    <string name="automation_reply_rate_limit_hint">Auto-reply cooldown (minutes, 0 = off) — one reply per thread per cooldown</string>
+    <string name="automation_export_logs">Export JSON</string>
+    <string name="automation_export_title">Export automation diagnostics</string>
+    <string name="automation_export_copy">Copy to clipboard</string>
+    <string name="automation_export_save">Save as file</string>
+    <string name="automation_export_copied">Diagnostics copied to clipboard</string>
+    <string name="automation_log_details">Log details</string>
+    <string name="automation_log_copy_payload">Copy full log as JSON</string>
     <string name="automation_save">Save rule</string>
     <string name="automation_rule_unnamed">Unnamed rule</string>
     <string name="automation_action_hint">Choose one action to perform when a message matches:</string>

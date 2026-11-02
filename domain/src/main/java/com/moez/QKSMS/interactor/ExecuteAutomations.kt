@@ -2,6 +2,7 @@ package dev.octoshrimpy.quik.interactor
 
 import android.content.Context
 import androidx.work.Data
+import androidx.work.BackoffPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
@@ -136,6 +137,10 @@ class ExecuteAutomations @Inject constructor(
             AutomationRule.ACTION_DELETE -> 6
             else -> 7
         }
+
+        fun compiledPlanFor(steps: List<AutomationActionStep>): String =
+            steps.sortedWith(compareBy { actionRank(it.action) }).joinToString(" -> ") { it.action }
+
         // Bounded daemon thread pool so stuck regex evaluations do not wedge subsequent matches or cause OOM (BUG-031)
         private val REGEX_EXECUTOR = java.util.concurrent.ThreadPoolExecutor(
             1, 4, 30L, java.util.concurrent.TimeUnit.SECONDS,
@@ -253,21 +258,36 @@ class ExecuteAutomations @Inject constructor(
 
         val isContact = contactsRepo.isContact(snap.address)
         val matchedRules = mutableListOf<AutomationRule>()
+        // Rules whose AUTO_REPLY steps were stripped by the reply cooldown;
+        // remaining steps (forward/mark/archive/delete) still execute.
+        val strippedSteps = mutableMapOf<Long, List<AutomationActionStep>>()
 
         for (rule in rules) {
             try {
                 if (!matches(rule, snap, isContact)) continue
 
-                val steps = rule.getActionSteps()
+                var steps = rule.getActionSteps()
                 if (steps.isEmpty()) continue
 
                 // Enforce per-thread auto-reply rate limit before counting a hit:
-                // prevents automated reply loops between two machines.
+                // prevents automated reply loops between two machines. Only the
+                // AUTO_REPLY step is suppressed — the rule's other actions
+                // (forward/mark/archive/delete) still execute.
                 val hasAutoReply = steps.any { it.action == AutomationRule.ACTION_AUTO_REPLY }
                 if (hasAutoReply &&
                     !automationRepo.tryAcquireReplySlot(rule.id, snap.threadId, rule.replyRateLimitMs)) {
-                    Timber.d("AutomationRule '${rule.name}' rate-limited for thread ${snap.threadId}")
-                    continue
+                    Timber.d("AutomationRule '${rule.name}' reply rate-limited for thread ${snap.threadId}")
+                    automationRepo.log(
+                        rule.id,
+                        rule.name,
+                        snap.id,
+                        AutomationLog.TYPE_INFO,
+                        "AUTO_REPLY",
+                        "Auto-reply suppressed (cooldown ${rule.replyRateLimitMs}ms) for thread ${snap.threadId}"
+                    )
+                    steps = steps.filterNot { it.action == AutomationRule.ACTION_AUTO_REPLY }
+                    if (steps.isEmpty()) continue
+                    strippedSteps[rule.id] = steps
                 }
 
                 // Note: hitCount counts rule *matches*, not successful action
@@ -306,7 +326,7 @@ class ExecuteAutomations @Inject constructor(
         if (matchedRules.isEmpty()) return ExecutionResult.Normal(false)
 
         val primaryRule = matchedRules.first()
-        val allSteps = matchedRules.flatMap { it.getActionSteps() }
+        val allSteps = matchedRules.flatMap { strippedSteps[it.id] ?: it.getActionSteps() }
 
         // Deduplicate actions semantically so duplicate thread mutations or deletions across rules are merged
         val deduplicatedSteps = mutableListOf<AutomationActionStep>()
@@ -360,11 +380,47 @@ class ExecuteAutomations @Inject constructor(
 
         if (filteredSteps.isEmpty()) return ExecutionResult.Normal(false)
 
+        automationRepo.log(
+            primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_INFO,
+            "PLAN", "Compiled action plan: ${compiledPlanFor(filteredSteps)}",
+            dev.octoshrimpy.quik.model.AutomationDiag.json(
+                "stage" to "plan_compile",
+                "outcome" to "ok",
+                "rulesConsidered" to rules.size,
+                "ruleIdsConsidered" to rules.map { it.id.toString() },
+                "matchedRuleIds" to matchedRules.map { it.id.toString() },
+                "stepsBeforeDedup" to allSteps.size,
+                "stepsAfterDedup" to deduplicatedSteps.size,
+                "stepsAfterAntiCascade" to filteredSteps.size,
+                "compiledPlan" to filteredSteps.sortedWith(compareBy { actionRank(it.action) }).map { it.action }
+            )
+        )
+
         // Compile unified plan strictly adhering to canonical order:
         // Egress (HTTP, SMS, AUTO_REPLY) -> Thread Mutations (MARK_READ, ARCHIVE) -> Terminal Action (DELETE)
         val compiledPlan = filteredSteps.sortedWith(compareBy { actionRank(it.action) })
 
         val hasDelete = compiledPlan.any { it.action == AutomationRule.ACTION_DELETE }
+
+        val minDelayMs0 = matchedRules.map { it.delayMs }.minOrNull() ?: 0L
+        automationRepo.log(
+            primaryRule.id, primaryRule.name, snap.id, AutomationLog.TYPE_INFO,
+            "DISPATCH", "hasDelete=$hasDelete delayMs=$minDelayMs0 async=${compiledPlan.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP || it.action == AutomationRule.ACTION_AUTO_REPLY }}",
+            dev.octoshrimpy.quik.model.AutomationDiag.json(
+                "stage" to "dispatch",
+                "outcome" to "ok",
+                "hasDelete" to hasDelete,
+                "minDelayMs" to minDelayMs0,
+                "uniqueWorkName" to "automation_msg_${snap.id}",
+                "mode" to if (compiledPlan.any { it.action == AutomationRule.ACTION_FORWARD_SMS || it.action == AutomationRule.ACTION_FORWARD_HTTP || it.action == AutomationRule.ACTION_AUTO_REPLY } || minDelayMs0 > 0L) "worker" else "inline"
+            )
+        )
+
+        // Suppression expiry: 60s for immediate chains; delay + 10min buffer for
+        // delayed chains so the watchdog never unsuppresses before the worker runs
+        // (Doze/battery deferral included).
+        val suppressionExpiresAt = System.currentTimeMillis() +
+            (if (minDelayMs0 > 0L) minDelayMs0 + 600_000L else 60_000L)
 
         if (hasDelete) {
             message.pendingSuppression = true
@@ -373,13 +429,15 @@ class ExecuteAutomations @Inject constructor(
                     val r = message.realm
                     if (r.isInTransaction) {
                         message.pendingSuppression = true
+                        message.suppressionExpiresAt = suppressionExpiresAt
                     } else {
                         r.executeTransaction {
                             message.pendingSuppression = true
+                            message.suppressionExpiresAt = suppressionExpiresAt
                         }
                     }
                 } else {
-                    messageRepo.markPendingSuppression(snap.id)
+                    messageRepo.markPendingSuppression(snap.id, suppressionExpiresAt)
                 }
             } catch (e: Exception) {
                 Timber.w(e, "Failed to mark message pendingSuppression in Realm")
@@ -611,6 +669,7 @@ class ExecuteAutomations @Inject constructor(
 
         val request = OneTimeWorkRequest.Builder(workerClass)
             .setInputData(data)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
             .apply { if (delayMs > 0) setInitialDelay(delayMs, TimeUnit.MILLISECONDS) }
             .build()
 

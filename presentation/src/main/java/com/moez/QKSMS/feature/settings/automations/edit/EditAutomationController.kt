@@ -155,6 +155,16 @@ class EditAutomationController(private val ruleId: Long = -1L)
                 else -> ctx.getString(R.string.automation_delay_selected_custom, state.delayMs / 1000)
             }
 
+            val forwardText = if (state.forwardRateLimitMin > 0) state.forwardRateLimitMin.toString() else ""
+            if (binding.forwardRateLimitField.text?.toString() ?: "" != forwardText) {
+                binding.forwardRateLimitField.setText(forwardText)
+            }
+            val replyText = if (state.replyRateLimitMin > 0) state.replyRateLimitMin.toString() else ""
+            if (binding.replyRateLimitField.text?.toString() ?: "" != replyText) {
+                binding.replyRateLimitField.setText(replyText)
+            }
+
+
             // Render modular action steps only if action steps actually changed
             if (lastRenderedSteps != state.actionSteps) {
                 renderActionSteps(state.actionSteps)
@@ -511,6 +521,14 @@ class EditAutomationController(private val ruleId: Long = -1L)
     }
 
     override fun delaySelected(): Observable<Long> = delaySubject
+    override fun forwardRateLimitChanges(): Observable<Int> =
+        binding.forwardRateLimitField.textChanges().skipInitialValue().filter { !isRendering }
+            .debounce(300, TimeUnit.MILLISECONDS)
+            .map { it.toString().toIntOrNull() ?: 0 }
+    override fun replyRateLimitChanges(): Observable<Int> =
+        binding.replyRateLimitField.textChanges().skipInitialValue().filter { !isRendering }
+            .debounce(300, TimeUnit.MILLISECONDS)
+            .map { it.toString().toIntOrNull() ?: 0 }
     override fun saveClicks(): Observable<*> = binding.saveButton.clicks().doOnNext { flushStepDebounce() }
     override fun presetClicks(): Observable<*> = binding.presetsButton.clicks()
 

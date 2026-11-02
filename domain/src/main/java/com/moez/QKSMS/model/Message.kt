@@ -56,6 +56,7 @@ open class Message : RealmObject() {
     var locked: Boolean = false
     var subId: Int = -1
     @Index var pendingSuppression: Boolean = false
+    var suppressionExpiresAt: Long = 0L
 
     // SMS only
     var body: String = ""

@@ -36,12 +36,18 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
     private val clearFailedSubject: Subject<Unit> = PublishSubject.create()
     private val clearLogsSubject: Subject<Unit> = PublishSubject.create()
     private val filterLogsSubject: Subject<String> = PublishSubject.create()
+    private val exportLogsSubject: Subject<Unit> = PublishSubject.create()
+
+    companion object {
+        private const val REQUEST_SAVE_EXPORT = 2002
+    }
 
     private val adapter = AutomationRulesAdapter()
     private val failedAdapter = FailedAutomationMessagesAdapter()
     private val logsAdapter = AutomationLogsAdapter()
 
     private var currentTab: Int = AutomationsState.TAB_RULES
+    private var pendingExportJson: String? = null
 
     init {
         appComponent.inject(this)
@@ -63,6 +69,12 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
         super.onViewCreated()
         binding.fab.setBackgroundTint(colors.theme().theme)
         binding.fab.setTint(colors.theme().textPrimary)
+
+        // SAF save handled via startActivityForResult/onActivityResult (Conductor
+        // controllers don't support the androidx ActivityResult API)
+
+        logsAdapter.clicks
+            .subscribe { log -> showLogDetails(log) }
 
         adapter.emptyView = binding.empty
         binding.rulesRecycler.adapter = adapter
@@ -96,6 +108,7 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
         binding.chipFilterAll.setOnClickListener { filterLogsSubject.onNext(AutomationsState.FILTER_ALL) }
         binding.chipFilterErrors.setOnClickListener { filterLogsSubject.onNext("ERROR") }
         binding.chipFilterSuccess.setOnClickListener { filterLogsSubject.onNext("SUCCESS") }
+        binding.exportLogsButton.setOnClickListener { exportLogsSubject.onNext(Unit) }
     }
 
     override fun onDestroyView(view: View) {
@@ -212,6 +225,105 @@ class AutomationsController : QkController<AutomationsControllerBinding, Automat
     override fun clearFailedClicks(): Observable<*> = clearFailedSubject
     override fun filterLogsClicks(): Observable<String> = filterLogsSubject
     override fun clearLogsClicks(): Observable<*> = clearLogsSubject
+    override fun exportLogsClicks(): Observable<Unit> = exportLogsSubject
+
+    override fun showExport(json: String) {
+        val act = activity ?: return
+        AlertDialog.Builder(act)
+            .setTitle(R.string.automation_export_title)
+            .setItems(
+                arrayOf(
+                    act.getString(R.string.automation_export_copy),
+                    act.getString(R.string.automation_export_save)
+                )
+            ) { _, which ->
+                when (which) {
+                    0 -> {
+                        val capped = if (json.length > 500_000) json.take(500_000) + "\n\"…truncated\"" else json
+                        val clipboard = act.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                            as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(
+                            android.content.ClipData.newPlainText("quik-automation-diagnostics", capped)
+                        )
+                        android.widget.Toast.makeText(act, R.string.automation_export_copied, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> {
+                        val fileName = "quik-automation-logs-" +
+                            java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                                .format(java.util.Date()) + ".json"
+                        val intent = android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                            type = "application/json"
+                            putExtra(android.content.Intent.EXTRA_TITLE, fileName)
+                        }
+                        startActivityForResult(intent, REQUEST_SAVE_EXPORT)
+                    }
+                }
+            }
+            .setNegativeButton(R.string.button_cancel, null)
+            .show()
+        pendingExportJson = json
+    }
+
+    override fun showLogDetails(log: dev.octoshrimpy.quik.model.AutomationLog) {
+        val act = activity ?: return
+        val pretty = try {
+            org.json.JSONObject(log.jsonPayload.ifBlank { "{}" }).toString(2)
+        } catch (e: Exception) {
+            log.jsonPayload
+        }
+        val message = buildString {
+            append("Type: ").append(log.type).append('\n')
+            append("Action: ").append(log.actionType).append('\n')
+            append("Rule: ").append(log.ruleName.ifBlank { "Automation" }).append('\n')
+            append("Message ID: ").append(log.messageId).append('\n')
+            append("Timestamp: ").append(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                .format(java.util.Date(log.timestamp))).append('\n')
+            append("\nDetails:\n").append(log.details).append('\n')
+            append("\nPayload:\n").append(pretty)
+        }
+        AlertDialog.Builder(act)
+            .setTitle(R.string.automation_log_details)
+            .setMessage(message)
+            .setPositiveButton(R.string.automation_log_copy_payload) { _, _ ->
+                val entryJson = org.json.JSONObject()
+                    .put("id", log.id)
+                    .put("ts", log.timestamp)
+                    .put("type", log.type)
+                    .put("actionType", log.actionType)
+                    .put("ruleId", log.ruleId)
+                    .put("ruleName", log.ruleName)
+                    .put("messageId", log.messageId)
+                    .put("details", log.details)
+                    .put("data", org.json.JSONObject(log.jsonPayload.ifBlank { "{}" }))
+                    .toString(2)
+                val clipboard = act.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                clipboard.setPrimaryClip(
+                    android.content.ClipData.newPlainText("quik-automation-log", entryJson)
+                )
+                android.widget.Toast.makeText(act, R.string.automation_export_copied, android.widget.Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.button_cancel, null)
+            .show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_SAVE_EXPORT && resultCode == android.app.Activity.RESULT_OK) {
+            val uri = data?.data ?: return
+            val json = pendingExportJson ?: return
+            pendingExportJson = null
+            try {
+                activity?.contentResolver?.openOutputStream(uri)?.use { out ->
+                    out.write(json.toByteArray(Charsets.UTF_8))
+                }
+                android.widget.Toast.makeText(activity, R.string.automation_export_copied, android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                android.util.Log.w("AutomationsController", "Failed to write export file", e)
+            }
+        }
+    }
 
     override fun confirmDelete(ruleId: Long) {
         val act = activity ?: return

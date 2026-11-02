@@ -115,9 +115,9 @@ class QKApplication : Application(), HasActivityInjector, HasBroadcastReceiverIn
             billingManager.queryProducts()
             try {
                 val threadIds = if (::messageRepo.isInitialized) {
-                    messageRepo.resetOrphanedSuppressedMessages(60_000L)
+                    messageRepo.resetOrphanedSuppressedMessages()
                 } else {
-                    HousekeepingWorker.scanAndResetOrphanedSuppressedMessages(60_000L)
+                    HousekeepingWorker.scanAndResetOrphanedSuppressedMessages()
                 }
                 if (::notificationManager.isInitialized) {
                     threadIds.forEach { notificationManager.update(it) }

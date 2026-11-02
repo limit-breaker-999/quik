@@ -16,6 +16,8 @@ interface AutomationRuleRepository {
     fun deleteRule(id: Long)
 
     fun getEnabledRules(): List<AutomationRule>
+    fun getRulesList(): List<AutomationRule> = emptyList()
+
 
     /**
      * Atomically reserve an auto-reply slot for the given rule and thread:
@@ -24,7 +26,9 @@ interface AutomationRuleRepository {
      * Used to prevent automated reply loops between two machines.
      */
     fun tryAcquireReplySlot(ruleId: Long, threadId: Long, rateLimitMs: Long): Boolean
-    fun tryAcquireForwardSlot(destination: String, rateLimitMs: Long): Boolean = true
+    fun tryAcquireForwardSlot(destination: String, contentKey: String, rateLimitMs: Long): Boolean = true
+    fun releaseForwardSlot(destination: String, contentKey: String) {}
+    fun releaseReplySlot(ruleId: Long, threadId: Long) {}
     fun checkOutboundBudget(maxMessages: Int = 20, windowMs: Long = 30 * 60 * 1000L): Boolean = true
     fun recordOutboundSms(destination: String) {}
     fun incrementHitCount(id: Long)
@@ -39,7 +43,7 @@ interface AutomationRuleRepository {
     // Automation Activity Logs
     fun getLogs(type: String? = null): RealmResults<AutomationLog>? = null
     fun getLogsList(type: String? = null): List<AutomationLog> = emptyList()
-    fun log(ruleId: Long, ruleName: String, messageId: Long, type: String, actionType: String, details: String) {}
+    fun log(ruleId: Long, ruleName: String, messageId: Long, type: String, actionType: String, details: String, payloadJson: String = "{}") {}
     fun clearLogs() {}
     fun pruneOldLogs(maxAgeDays: Int = 7) {}
 

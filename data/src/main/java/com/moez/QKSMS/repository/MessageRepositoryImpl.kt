@@ -1091,20 +1091,22 @@ open class MessageRepositoryImpl @Inject constructor(
         return sha256(signatureString)
     }
 
-    override fun resetOrphanedSuppressedMessages(ttlMs: Long): List<Long> {
-        val cutoff = System.currentTimeMillis() - ttlMs
+    override fun resetOrphanedSuppressedMessages(): List<Long> {
+        val now = System.currentTimeMillis()
         val threadIds = mutableSetOf<Long>()
         try {
             Realm.getDefaultInstance().use { realm ->
                 val orphaned = realm.where(Message::class.java)
                     .equalTo("pendingSuppression", true)
-                    .lessThanOrEqualTo("date", cutoff)
+                    .greaterThan("suppressionExpiresAt", 0L)
+                    .lessThanOrEqualTo("suppressionExpiresAt", now)
                     .findAll()
 
                 if (orphaned.isNotEmpty()) {
                     realm.executeTransaction {
                         orphaned.forEach { msg ->
                             msg.pendingSuppression = false
+                            msg.suppressionExpiresAt = 0L
                             threadIds.add(msg.threadId)
                         }
                     }
@@ -1116,7 +1118,7 @@ open class MessageRepositoryImpl @Inject constructor(
         return threadIds.toList()
     }
 
-    override fun markPendingSuppression(messageId: Long) {
+    override fun markPendingSuppression(messageId: Long, expiresAt: Long) {
         try {
             Realm.getDefaultInstance().use { realm ->
                 realm.where(Message::class.java)
@@ -1125,6 +1127,7 @@ open class MessageRepositoryImpl @Inject constructor(
                     ?.let { msg ->
                         realm.executeTransaction {
                             msg.pendingSuppression = true
+                            msg.suppressionExpiresAt = expiresAt
                         }
                     }
             }

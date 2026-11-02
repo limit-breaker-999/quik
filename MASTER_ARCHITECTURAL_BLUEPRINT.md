@@ -180,18 +180,18 @@ When a user requests messages 3 to 4 times within 15 minutes, forwards fail and 
 - When a 3-part SMS is dispatched, `QkTransaction.kt:342` attaches `sentPI` for each part.
 - `MessageSentReceiver.kt:66-75` receives a separate callback for each part. If part 1 succeeds, it calls `markSent`. If part 2 fails, it calls `markFailed`. If part 3 succeeds, it calls `markSent` again. The status is corrupted, and partial transmission causes the receiving carrier SMSC to drop reassembly.
 
-### 4.2 Engineering Solution: Two-Phase Commit & Pacing Engine
+### 4.2 Engineering Solution: Content-Keyed Cooldown, Refund + Retry & Pacing Engine (implemented)
 
-1. **Two-Phase Commit (Forward-Then-Delete)**:
-   - For an automation chain containing `[FORWARD_SMS, DELETE]`:
-     - Step 0 (`FORWARD_SMS`): Dispatch forward with a unique `correlationId`. Hold original message in `pendingSuppression = true`.
-     - `MessageSentReceiver` tracks all parts of the multipart message. Only when ALL parts report `Activity.RESULT_OK` does it emit a success signal to WorkManager.
-     - WorkManager executes Step 1 (`ACTION_DELETE`).
-     - If `MessageSentReceiver` reports any failure code: abort deletion, reset `pendingSuppression = false`, post notification on `automation_failures` channel, and restore original message in inbox.
-2. **Serial Transmission Pacing Queue**:
-   - Outbound SMS dispatches must be funneled through a serial FIFO queue with a **2,000ms inter-message pacing interval**. Baseband modem buffers are never overwhelmed by concurrent threads.
-3. **Outbound SMS Budget Tracker**:
-   - Track rolling 30-minute outbound SMS count in Realm (`OutboundSmsTracker`). Cap automated sends at 25 SMS per 30 minutes to stay safely below the Android OS `SmsUsageMonitor` threshold.
+1. **Content-Keyed Forward Cooldown** (`AutomationRuleRepositoryImpl.tryAcquireForwardSlot(destination, contentKey, rateLimitMs)`):
+   - Realm slot key `"forward:<normalizedDest>:<sha256(body).take(16)>"`. Only *identical content* to the same destination within the cooldown (default 60s, configurable in rule editor, 0 = off) is blocked — this is duplicate/loop debounce, not a blanket per-destination throttle. Distinct messages to the same target pass freely.
+2. **Refund + Retry on Send Failure** (`AutomationActionWorker`):
+   - `releaseForwardSlot`/`releaseReplySlot` delete the slot when a send attempt fails — a failed send never blocks retries.
+   - Transient send failures (`sent.isEmpty()` or exception) return `Result.retry()` with `BackoffPolicy.EXPONENTIAL, 10s` while `runAttemptCount < 3`; only then is the step terminally failed (`handleStepFailure`: retryable `FailedAutomationMessage` + delete original per rule intent).
+3. **Decline = Skip, Not Failure**: cooldown / self-loop / carrier-shortcode declines skip the egress step with an INFO log (chain continues; DELETE still wipes the original — suppression-first invariant). Budget exhaustion (20/30min) skips the step but records a retryable `FailedAutomationMessage`. The reply cooldown strips only the rule's AUTO_REPLY steps; forwards still execute.
+4. **Suppression Expiry Replaces Fixed 60s Watchdog**: `pendingSuppression` now carries `suppressionExpiresAt = now + delayMs + 10min` (60s for immediate chains). The watchdog (`QKApplication`, `BootReceiver`, `HousekeepingWorker`) only resets *expired* suppressions, so delayed chains never flash into the inbox.
+5. **Serial Transmission Pacing Queue**: outbound SMS dispatches funnel through `RadioPacingManager` with a 2,000ms inter-message interval.
+6. **Outbound SMS Budget Tracker**: `OutboundSmsTracker` rolling 30-minute window, cap 20 automated sends per 30 minutes.
+7. **Dual-SIM subId**: `SmsReceivedReceiver` reads `android.telephony.extra.SUBSCRIPTION_ID` (with legacy `"subscription"` fallback).
 
 ---
 
@@ -213,7 +213,7 @@ When a user requests messages 3 to 4 times within 15 minutes, forwards fail and 
 
 ### 5.2 Device Reboot Recovery (`BOOT_COMPLETED`)
 - In `BootReceiver.kt:36`, query Realm for unsent delayed messages (`where(Message::class.java).equalTo("type", TYPE_QUEUED).findAll()`) and re-schedule `AlarmManager` alarms.
-- Scan for orphaned `pendingSuppression == true` messages older than 60 seconds and reset suppression.
+- Reset only *expired* suppressions: messages with `pendingSuppression == true` and `suppressionExpiresAt <= now` (set to `delayMs + 10min` at chain creation). Unexpired delayed chains stay hidden.
 
 ### 5.3 Memory Leak & Resource Audit Findings
 
@@ -365,7 +365,7 @@ To guarantee deterministic execution and eliminate race conditions:
 When an outbound forward triggers an immediate inbound balance/delivery SMS from the carrier SIM (e.g. "Balance remaining: $14.50"), and that feedback SMS matches another forward rule:
 1. **Carrier Shortcode / Alphanumeric Filter**: Block automated `ACTION_FORWARD_SMS` if the sender is an alphanumeric shortcode (length $\le 6$ and non-E.164) or USSD gateway unless explicitly whitelisted.
 2. **Self-Forward / Loop Header Detection**: Abort automated forwarding if `message.body` contains `"From: <own_number>"` or the target forwarding destination.
-3. **Forward Rate Limiting (`forwardRateLimitMs`)**: Add per-destination forward debouncing (default 60s cooldown per destination).
+3. **Forward Rate Limiting (`forwardRateLimitMs`)**: Content-keyed duplicate debounce — slot key `forward:<normalizedDest>:<sha256(body).take(16)>` (default 60s, editor-configurable, 0 = off). Blocks only identical content to the same destination; distinct messages pass. Failed sends refund the slot (`releaseForwardSlot`).
 4. **Rolling Outbound Budget**: Cap automated SMS at 20 messages per 30 minutes in Realm (`OutboundSmsTracker`) to prevent triggering Android's 30-message `SmsUsageMonitor` background security dialog.
 5. **Serial Radio Pacing Queue**: Funnel outbound automated SMS through a 2,000ms inter-message pacing queue to eliminate baseband modem buffer collisions and carrier SMSC congestion (`SM_CAUSE_CONGESTION`).
 
@@ -441,4 +441,17 @@ When an outbound forward triggers an immediate inbound balance/delivery SMS from
 | **Sync Realm Leak Plug** | ✅ Verified | `SyncRepositoryImpl` safely manages background thread Realm lifecycle, closing instances on success, error, and exception before `handlerThread.quitSafely()`. |
 | **Massacre Stress Test Suite** | ✅ 100% Pass | 52 automated tests in `AutomationPipelineE2ETest.kt` (63 unit tests across suite, 104 Gradle tasks) pass cleanly with `--rerun-tasks`. |
 | **APK Release Delivery** | ✅ Delivered | `QUIK-v4.5.0-release.apk` (55,915,309 bytes, v1-v3 signed + v4 idsig) transferred 100% to `sirius:` over Tailscale. |
+
+---
+
+## Section 10: Deep Automation Diagnostics & JSON Export (implemented)
+
+### 10.1 Structured Event Payloads
+`AutomationLog` gained `jsonPayload: String` (schema v22) populated via `AutomationDiag.json(vararg pairs)` (compact single-line JSON, nulls omitted). Every pipeline stage now emits a structured event: `INGEST`, `BLOCK_CHECK`, `FILTER_CHECK`, `AUTOMATION` (ReceiveSmsWorker); `MATCH`, `PLAN`, `DISPATCH` (ExecuteAutomations); `forward_guard`/`forward_send`/`reply_send` guard verdicts and send outcomes with `outboundMessageIds`, `attempt`, `runAttemptCount` (AutomationActionWorker); `RADIO_ACK` per-part radio confirmations (MessageSentReceiver — correlates via `outboundMessageId`); terminal failures carry full `error`, `sender`, truncated `body`, and `actionsJson`.
+
+### 10.2 One-Click Export (Settings → Automations → Logs)
+- **"Export JSON" bar** above the logs list → dialog with **Copy to clipboard** (capped 500k chars, truncation marker) and **Save as file** (`ACTION_CREATE_DOCUMENT`, full JSON, `quik-automation-logs-<ts>.json`).
+- Envelope: `{exportedAt, appVersion, device{model,manufacturer,android,sdkInt}, schema:1, rules[full config incl. both cooldowns], failedMessages[all fields], events[ascending by ts, each with parsed data payload]}` — machine-ingestible by external agents/backends.
+- **Per-entry drill-down**: tap any log row → dialog with details + pretty-printed payload + copy-as-JSON button.
+
 

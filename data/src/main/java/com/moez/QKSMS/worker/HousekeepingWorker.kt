@@ -71,22 +71,23 @@ class HousekeepingWorker(appContext: Context, workerParams: WorkerParameters)
         }
 
         fun scanAndResetOrphanedSuppressedMessages(
-            ttlMs: Long = 60_000L,
             realmProvider: () -> Realm = { Realm.getDefaultInstance() }
         ): List<Long> {
-            val cutoff = System.currentTimeMillis() - ttlMs
+            val now = System.currentTimeMillis()
             val threadIds = mutableSetOf<Long>()
             try {
                 realmProvider().use { realm ->
                     val orphaned = realm.where(Message::class.java)
                         .equalTo("pendingSuppression", true)
-                        .lessThanOrEqualTo("date", cutoff)
+                        .greaterThan("suppressionExpiresAt", 0L)
+                        .lessThanOrEqualTo("suppressionExpiresAt", now)
                         .findAll()
 
                     if (orphaned.isNotEmpty()) {
                         realm.executeTransaction {
                             orphaned.forEach { msg ->
                                 msg.pendingSuppression = false
+                                msg.suppressionExpiresAt = 0L
                                 threadIds.add(msg.threadId)
                             }
                         }
@@ -105,13 +106,12 @@ class HousekeepingWorker(appContext: Context, workerParams: WorkerParameters)
     @Inject lateinit var notificationManager: NotificationManager
 
     fun resetOrphanedSuppressedMessages(
-        ttlMs: Long = 60_000L,
         realmProvider: () -> Realm = { Realm.getDefaultInstance() }
     ): List<Long> {
         val threadIds = if (::messageRepo.isInitialized) {
-            messageRepo.resetOrphanedSuppressedMessages(ttlMs)
+            messageRepo.resetOrphanedSuppressedMessages()
         } else {
-            scanAndResetOrphanedSuppressedMessages(ttlMs, realmProvider)
+            scanAndResetOrphanedSuppressedMessages(realmProvider)
         }
         if (::notificationManager.isInitialized) {
             threadIds.forEach { notificationManager.update(it) }

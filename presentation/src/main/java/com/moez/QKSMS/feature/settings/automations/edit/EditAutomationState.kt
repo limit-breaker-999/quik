@@ -16,6 +16,8 @@ data class EditAutomationState(
     val skipContacts: Boolean = false,
     val actionSteps: List<AutomationActionStep> = listOf(AutomationActionStep(action = AutomationRule.ACTION_DELETE)),
     val delayMs: Long = 0L,
+    val forwardRateLimitMin: Int = 1,
+    val replyRateLimitMin: Int = 1440,
     val enabled: Boolean = true
 ) {
     val action: String get() = actionSteps.firstOrNull()?.action ?: AutomationRule.ACTION_DELETE

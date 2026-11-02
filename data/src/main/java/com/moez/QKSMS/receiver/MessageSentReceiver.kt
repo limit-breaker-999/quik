@@ -40,6 +40,7 @@ class MessageSentReceiver : BroadcastReceiver() {
     @Inject lateinit var markSent: MarkSent
     @Inject lateinit var markFailed: MarkFailed
     @Inject lateinit var messageRepo: MessageRepository
+    @Inject lateinit var automationRepo: dev.octoshrimpy.quik.repository.AutomationRuleRepository
 
     override fun onReceive(context: Context?, intent: Intent) {
         AndroidInjection.inject(this, context)
@@ -60,9 +61,27 @@ class MessageSentReceiver : BroadcastReceiver() {
         intent.extras?.getLong(EXTRA_QUIK_MESSAGE_ID)?.takeIf { it > 0 }
             ?.let { messageId ->
                 Timber.v("resultcode: $resultCode")
-
                 val pendingResult = goAsync()
 
+                try {
+                    automationRepo.log(
+                        0L,
+                        "radio",
+                        messageId,
+                        if (pendingResult.resultCode == Activity.RESULT_OK) dev.octoshrimpy.quik.model.AutomationLog.TYPE_INFO
+                        else dev.octoshrimpy.quik.model.AutomationLog.TYPE_ERROR,
+                        "RADIO_ACK",
+                        "Radio ack resultCode=${pendingResult.resultCode} for message $messageId",
+                        dev.octoshrimpy.quik.model.AutomationDiag.json(
+                            "stage" to "radio_ack",
+                            "outcome" to if (pendingResult.resultCode == Activity.RESULT_OK) "sent" else "failed",
+                            "outboundMessageId" to messageId,
+                            "resultCode" to pendingResult.resultCode
+                        )
+                    )
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to log radio ack")
+                }
                 when (pendingResult.resultCode) {
                     Activity.RESULT_OK ->
                         markSent.execute(messageId) { pendingResult.finish() }
